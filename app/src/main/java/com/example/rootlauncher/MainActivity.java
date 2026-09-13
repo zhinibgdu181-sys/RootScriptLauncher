@@ -107,11 +107,11 @@ public class MainActivity extends AppCompatActivity {
         Set<String> savedScripts = prefs.getStringSet("scripts", new HashSet<>());
         scriptList.addAll(savedScripts);
 
-        // 🛠️ 核心：自动提取安装包内的脚本
-        extractDefaultScript();
-
         adapter = new ScriptAdapter();
         lvScripts.setAdapter(adapter);
+
+        // 🛠️ 核心：自动提取安装包内的预设脚本（支持多个）
+        extractDefaultScripts();
 
         btnAdd.setOnClickListener(v -> {
             Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
@@ -150,43 +150,51 @@ public class MainActivity extends AppCompatActivity {
     // ============================================================
     // 🛠️ 从 assets 提取预设脚本到私有目录，并加入列表
     // ============================================================
-    private void extractDefaultScript() {
-        // 用 SharedPreferences 记录是否已经添加过，防止用户删掉后重启又自动出现
-        boolean isAdded = prefs.getBoolean("isDefaultScriptAdded", false);
-        if (isAdded) return;
+    private void extractDefaultScripts() {
+        // 定义需要内置的脚本文件名列表
+        String[] defaultScripts = {
+                "Kairos_Driver_Loader_Release_90f76e9.sh",
+                "TIME_Cloud_Loader_Release_1732727.sh"
+        };
 
-        String scriptName = "Kairos_Driver_Loader_Release_90f76e9.sh";
-        File destFile = new File(getFilesDir(), scriptName);
+        boolean hasNew = false;
 
-        try {
-            // 从 assets 复制
-            if (!destFile.exists()) {
-                InputStream is = getAssets().open(scriptName);
-                FileOutputStream fos = new FileOutputStream(destFile);
-                byte[] buffer = new byte[8192];
-                int len;
-                while ((len = is.read(buffer)) > 0) {
-                    fos.write(buffer, 0, len);
+        for (String scriptName : defaultScripts) {
+            File destFile = new File(getFilesDir(), scriptName);
+
+            try {
+                // 1. 如果文件不存在，从 assets 复制并赋予执行权限
+                if (!destFile.exists()) {
+                    InputStream is = getAssets().open(scriptName);
+                    FileOutputStream fos = new FileOutputStream(destFile);
+                    byte[] buffer = new byte[8192];
+                    int len;
+                    while ((len = is.read(buffer)) > 0) {
+                        fos.write(buffer, 0, len);
+                    }
+                    is.close();
+                    fos.close();
+
+                    Process chmod = new ProcessBuilder("chmod", "755", destFile.getAbsolutePath())
+                            .redirectErrorStream(true).start();
+                    chmod.waitFor();
                 }
-                is.close();
-                fos.close();
 
-                Process chmod = new ProcessBuilder("chmod", "755", destFile.getAbsolutePath())
-                        .redirectErrorStream(true).start();
-                chmod.waitFor();
+                // 2. 如果列表中还没有这个脚本，添加进去
+                if (!scriptList.contains(destFile.getAbsolutePath())) {
+                    scriptList.add(destFile.getAbsolutePath());
+                    hasNew = true;
+                }
+
+            } catch (Exception e) {
+                // 如果 assets 里没有这个文件，忽略即可，不影响用户手动添加
             }
+        }
 
-            // 检查列表里有没有，没有就加进去
-            if (!scriptList.contains(destFile.getAbsolutePath())) {
-                scriptList.add(destFile.getAbsolutePath());
-                saveScripts();
-            }
-
-            // 标记已添加
-            prefs.edit().putBoolean("isDefaultScriptAdded", true).apply();
-
-        } catch (Exception e) {
-            // 如果 assets 里没有这个文件，忽略即可，不影响用户手动添加
+        // 如果有新增的，刷新列表并保存
+        if (hasNew) {
+            adapter.notifyDataSetChanged();
+            saveScripts();
         }
     }
 
@@ -549,4 +557,4 @@ public class MainActivity extends AppCompatActivity {
         writer = null;
         process = null;
     }
-}
+                }
