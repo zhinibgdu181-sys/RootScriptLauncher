@@ -35,6 +35,13 @@
                 android:text="ROOT SCRIPT LAUNCHER"
                 android:textSize="12sp"
                 android:textColor="#999999" />
+            <!-- 🛠️ 加上了作者信息 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="作者：cyh 大 sb"
+                android:textSize="12sp"
+                android:textColor="#E53935" /> <!-- 红色比较显眼 -->
         </LinearLayout>
 
         <Button
@@ -46,7 +53,7 @@
             android:backgroundTint="#2196F3" />
     </LinearLayout>
 
-    <!-- 🛠️ 脚本列表：改为占据屏幕的 60% -->
+    <!-- 脚本列表：默认占 60% 屏幕空间，键盘弹出时 Java 代码会动态改小 -->
     <ListView
         android:id="@+id/lvScripts"
         android:layout_width="match_parent"
@@ -58,7 +65,7 @@
         app:layout_constraintHeight_percent="0.55"
         app:layout_constraintTop_toBottomOf="@id/topBar" />
 
-    <!-- 终端输出区：占据剩余的空间 -->
+    <!-- 终端输出区：占据剩余空间 -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
