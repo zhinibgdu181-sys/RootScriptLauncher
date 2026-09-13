@@ -22,9 +22,12 @@ jobs:
     - name: Download static busybox to assets
       run: |
         mkdir -p app/src/main/assets
-        # 这里是关键：改用专门适配 Android 64位 ARM 的静态 busybox
-        curl -L -o app/src/main/assets/busybox https://github.com/EXALAB/AnLinux-Resources/raw/master/usr/busybox/busybox-arm64
+        # 换用绝对可靠的 aarch64 静态 busybox
+        curl -L -o app/src/main/assets/busybox https://busybox.net/downloads/binaries/1.35.0-aarch64-linux-musl/busybox
         chmod +x app/src/main/assets/busybox
+        # 打印文件信息，方便排查
+        file app/src/main/assets/busybox
+        ls -lh app/src/main/assets/busybox
 
     - name: Build Debug APK
       run: gradle assembleDebug
