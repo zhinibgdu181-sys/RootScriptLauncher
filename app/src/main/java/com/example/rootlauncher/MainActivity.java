@@ -40,7 +40,7 @@ public class MainActivity extends AppCompatActivity {
     private BufferedWriter writer;
     private String pendingScriptPath = null;
     private android.content.SharedPreferences prefs;
-    private File busyboxFile; // 用于存放释放出的 busybox
+    private File busyboxFile;
 
     private final androidx.activity.result.ActivityResultLauncher<Intent> filePickerLauncher = registerForActivityResult(
             new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
@@ -82,7 +82,6 @@ public class MainActivity extends AppCompatActivity {
         Button btnAdd = findViewById(R.id.btnAdd);
         Button btnSend = findViewById(R.id.btnSend);
 
-        // 🛠️ 释放内置的 busybox 到私有目录
         extractBusybox();
 
         prefs = getSharedPreferences("script_prefs", MODE_PRIVATE);
@@ -119,19 +118,22 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // 🛠️ 从 assets 中提取内置的 busybox
     private void extractBusybox() {
         try {
-            busyboxFile = new File(getFilesDir(), "busybox");
-            if (!busyboxFile.exists()) {
+            File tempFile = new File(getFilesDir(), "busybox_temp");
+            if (!tempFile.exists()) {
                 InputStream is = getAssets().open("busybox");
-                FileOutputStream fos = new FileOutputStream(busyboxFile);
+                FileOutputStream fos = new FileOutputStream(tempFile);
                 byte[] buffer = new byte[8192];
                 int len;
                 while ((len = is.read(buffer)) > 0) fos.write(buffer, 0, len);
                 is.close(); fos.close();
-                Runtime.getRuntime().exec("chmod 755 " + busyboxFile.getAbsolutePath()).waitFor();
             }
+            
+            // 🛠️ 关键：SELinux 禁止从 /data/data/ 执行二进制，必须复制到 /data/local/tmp/
+            busyboxFile = new File("/data/local/tmp/root_launcher_busybox");
+            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "cp " + tempFile.getAbsolutePath() + " " + busyboxFile.getAbsolutePath() + " && chmod 755 " + busyboxFile.getAbsolutePath()});
+            p.waitFor();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -250,10 +252,10 @@ public class MainActivity extends AppCompatActivity {
                 if (new File(path).exists()) { suCmd = path; break; }
             }
 
-            // 🛠️ 使用内置 busybox 的 script 命令创建伪终端
             String command;
             if (busyboxFile != null && busyboxFile.exists()) {
-                command = busyboxFile.getAbsolutePath() + " script -q -c \"" + scriptPath + "\" /dev/null";
+                // 使用单引号包裹路径，防止转义引发的换行问题
+                command = busyboxFile.getAbsolutePath() + " script -q -c '" + scriptPath + "' /dev/null";
                 appendText("√ 已启用内置虚拟终端\n");
             } else {
                 command = scriptPath;
