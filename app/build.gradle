@@ -25,10 +25,14 @@ android {
 }
 
 dependencies {
-    // 👇 重点：这个 Kotlin BOM 强制统一所有 Kotlin 库的版本为 1.8.10，解决打架报错
+    // Kotlin 版本统一管理
     implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.10')
 
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.activity:activity:1.7.2'
     implementation 'com.google.android.material:material:1.9.0'
+
+    // 🛠️ 核心修复：补齐 ConstraintLayout 和 CardView 库
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.cardview:cardview:1.0.0'
 }
