@@ -557,4 +557,4 @@ public class MainActivity extends AppCompatActivity {
         writer = null;
         process = null;
     }
-                }
+}
