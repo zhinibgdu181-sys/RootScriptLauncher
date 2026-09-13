@@ -3,8 +3,10 @@ package com.example.rootlauncher;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -14,6 +16,7 @@ import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import java.io.BufferedReader;
@@ -24,6 +27,8 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
     private TextView tvOutput;
@@ -35,14 +40,17 @@ public class MainActivity extends AppCompatActivity {
     private Process process;
     private BufferedWriter writer;
     private String pendingScriptPath = null;
+    private android.content.SharedPreferences prefs;
 
     private final androidx.activity.result.ActivityResultLauncher<Intent> filePickerLauncher = registerForActivityResult(
             new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
             result -> {
                 if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
                     Uri uri = result.getData().getData();
-                    String fileName = "script_" + System.currentTimeMillis() + ".sh";
-                    File destFile = new File(getFilesDir(), fileName);
+                    String displayName = getFileName(uri);
+                    if (displayName == null) displayName = "script_" + System.currentTimeMillis() + ".sh";
+                    
+                    File destFile = new File(getFilesDir(), displayName);
                     try {
                         InputStream is = getContentResolver().openInputStream(uri);
                         FileOutputStream fos = new FileOutputStream(destFile);
@@ -51,9 +59,11 @@ public class MainActivity extends AppCompatActivity {
                         while ((len = is.read(buffer)) > 0) fos.write(buffer, 0, len);
                         is.close(); fos.close();
                         Runtime.getRuntime().exec("chmod 755 " + destFile.getAbsolutePath()).waitFor();
+                        
                         scriptList.add(destFile.getAbsolutePath());
                         adapter.notifyDataSetChanged();
-                        appendText("√ 已添加脚本: " + destFile.getName() + "\n");
+                        saveScripts();
+                        appendText("√ 已添加脚本: " + displayName + "\n");
                     } catch (Exception e) {
                         appendText("错误: 导入失败 " + e.getMessage() + "\n");
                     }
@@ -71,6 +81,11 @@ public class MainActivity extends AppCompatActivity {
         lvScripts = findViewById(R.id.lvScripts);
         Button btnAdd = findViewById(R.id.btnAdd);
         Button btnSend = findViewById(R.id.btnSend);
+
+        // 加载历史记录
+        prefs = getSharedPreferences("script_prefs", MODE_PRIVATE);
+        Set<String> savedScripts = prefs.getStringSet("scripts", new HashSet<>());
+        scriptList.addAll(savedScripts);
 
         adapter = new ScriptAdapter();
         lvScripts.setAdapter(adapter);
@@ -102,6 +117,29 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
+    // 获取文件真实名字
+    private String getFileName(Uri uri) {
+        String result = null;
+        if (uri.getScheme().equals("content")) {
+            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (nameIndex != -1) result = cursor.getString(nameIndex);
+                }
+            } catch (Exception e) { e.printStackTrace(); }
+        }
+        if (result == null) {
+            result = uri.getPath();
+            int cut = result.lastIndexOf('/');
+            if (cut != -1) result = result.substring(cut + 1);
+        }
+        return result;
+    }
+
+    private void saveScripts() {
+        prefs.edit().putStringSet("scripts", new HashSet<>(scriptList)).apply();
+    }
+
     private class ScriptAdapter extends ArrayAdapter<String> {
         public ScriptAdapter() {
             super(MainActivity.this, 0, scriptList);
@@ -113,15 +151,18 @@ public class MainActivity extends AppCompatActivity {
                 convertView = LayoutInflater.from(getContext()).inflate(R.layout.item_script, parent, false);
             }
             String path = scriptList.get(position);
+            // 👇 关键修改：只显示文件名
             String fileName = new File(path).getName();
             TextView tvName = convertView.findViewById(R.id.tvScriptName);
             Button btnRun = convertView.findViewById(R.id.btnRun);
             Button btnDelete = convertView.findViewById(R.id.btnDelete);
             tvName.setText(fileName);
+            
             btnRun.setOnClickListener(v -> new Thread(() -> runElf(path)).start());
             btnDelete.setOnClickListener(v -> {
                 scriptList.remove(position);
-                notifyDataSetChanged();
+                adapter.notifyDataSetChanged();
+                saveScripts();
                 appendText("X 已移除脚本: " + fileName + "\n");
             });
             return convertView;
@@ -192,9 +233,23 @@ public class MainActivity extends AppCompatActivity {
                 if (new File(path).exists()) { suCmd = path; break; }
             }
 
-            // 🛠️ 终极修复：因为它是 ELF 文件，所以直接执行它自己！
-            // 不要加 sh，加了就会报语法错误！
-            String command = scriptPath;
+            // 🛠️ 智能分配伪终端 (PTY) 解决盲输问题
+            String[] scriptPaths = {"/system/bin/script", "/system/xbin/script", "/data/data/com.termux/files/usr/bin/script"};
+            String scriptCmd = null;
+            for (String p : scriptPaths) {
+                if (new File(p).exists()) { scriptCmd = p; break; }
+            }
+
+            String command;
+            if (scriptCmd != null) {
+                // 找到了 script 命令，分配伪终端，菜单会完美显示
+                command = scriptCmd + " -q -c \"" + scriptPath + "\" /dev/null";
+                appendText("√ 已启用虚拟终端模式\n");
+            } else {
+                // 没找到 script，只能直接运行，如果卡住需要用户盲输
+                command = scriptPath;
+                appendText("√ 系统无 script 命令，若卡住请输入 1 并发送\n");
+            }
 
             ProcessBuilder pb = new ProcessBuilder(suCmd, "-c", command);
             pb.redirectErrorStream(true);
