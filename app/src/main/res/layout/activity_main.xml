@@ -46,7 +46,7 @@
             android:backgroundTint="#2196F3" />
     </LinearLayout>
 
-    <!-- 🛠️ 脚本列表：占用 30% 的屏幕空间。键盘弹出时它会自动按比例缩小 -->
+    <!-- 🛠️ 脚本列表：改为占据屏幕的 60% -->
     <ListView
         android:id="@+id/lvScripts"
         android:layout_width="match_parent"
@@ -55,10 +55,10 @@
         android:divider="@null"
         android:dividerHeight="8dp"
         android:background="@android:color/transparent"
-        app:layout_constraintHeight_percent="0.3"
+        app:layout_constraintHeight_percent="0.6"
         app:layout_constraintTop_toBottomOf="@id/topBar" />
 
-    <!-- 终端输出区：占据剩余的绝大部分空间 -->
+    <!-- 终端输出区：占据剩余的空间 -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
