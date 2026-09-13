@@ -117,12 +117,10 @@ public class MainActivity extends AppCompatActivity {
             if (input.length() == 0) return;
 
             if (writer == null) {
-                // 没有脚本在运行，输入框内容当作终端命令执行
                 executeCommand(input);
                 return;
             }
 
-            // 有脚本在运行，就把内容发送给脚本
             input += "\n";
             try {
                 writer.write(input);
@@ -147,7 +145,9 @@ public class MainActivity extends AppCompatActivity {
         appendText("$ " + cmd + "\n");
         new Thread(() -> {
             try {
-                ProcessBuilder pb = new ProcessBuilder(findSu(), "-c", cmd);
+                // 这里也加上 PATH，这样你手动敲 curl 也能生效
+                String finalCmd = "export PATH=/data/local/tmp:$PATH ; " + cmd;
+                ProcessBuilder pb = new ProcessBuilder(findSu(), "-c", finalCmd);
                 pb.redirectErrorStream(true);
                 Process p = pb.start();
                 
@@ -248,8 +248,11 @@ public class MainActivity extends AppCompatActivity {
             String elfPath = shellQuote(elf.getAbsolutePath());
             String elfCommand = "exec " + elfPath;
 
-            String command = shellQuote(busyboxFile.getAbsolutePath()) +
-                    " script -q -c " + shellQuote(elfCommand) + " /dev/null";
+            // 🛠️ 终极核心修复：将 BusyBox 所在的目录加入 PATH 环境变量
+            String busyboxDir = busyboxFile.getParent();
+            String command = "export PATH=" + busyboxDir + ":$PATH ; " + 
+                             shellQuote(busyboxFile.getAbsolutePath()) +
+                             " script -q -c " + shellQuote(elfCommand) + " /dev/null";
 
             ProcessBuilder pb = new ProcessBuilder(findSu(), "-c", command);
             pb.redirectErrorStream(true);
