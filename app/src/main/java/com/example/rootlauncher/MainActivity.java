@@ -95,7 +95,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 🛠️ 【新增需求】一打开软件就检测 Root 权限
+        // 一打开软件就检测 Root 权限
         new Thread(() -> {
             if (!checkRoot()) {
                 showRootDialog();
@@ -184,7 +184,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void runElfReal(String scriptPath) {
         try {
-            appendText("√ busybox 已就绪\n");
+            appendText("√ 准备运行脚本...\n");
             appendText("$ " + new File(scriptPath).getName() + "\n");
 
             String suCmd = "su";
@@ -193,15 +193,9 @@ public class MainActivity extends AppCompatActivity {
                 if (new File(path).exists()) { suCmd = path; break; }
             }
 
-            // 🛠️ 【修复盲输与script报错】优先使用 App 准备好的 busybox 里的 script 命令
-            String busyboxPath = "/data/local/tmp/root-runner-busybox";
-            if (!new File(busyboxPath).exists()) {
-                // 如果不在默认路径，尝试去系统路径找 busybox
-                busyboxPath = "busybox";
-            }
-            
-            // 使用 busybox script 分配伪终端 (PTY)
-            String command = busyboxPath + " script -q -c \"sh " + scriptPath + "\" /dev/null";
+            // 🛠️ 终极修复：放弃 busybox，直接使用 Android 自带的 sh 运行脚本
+            // 配合下方的“逐字符读取”，能最大限度地把脚本输出实时展现出来
+            String command = "sh " + scriptPath;
 
             ProcessBuilder pb = new ProcessBuilder(suCmd, "-c", command);
             pb.redirectErrorStream(true);
