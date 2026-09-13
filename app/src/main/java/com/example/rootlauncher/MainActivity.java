@@ -34,7 +34,6 @@ public class MainActivity extends AppCompatActivity {
     private Process process;
     private BufferedWriter writer;
 
-    // 接收文件选择结果
     private final androidx.activity.result.ActivityResultLauncher<Intent> filePickerLauncher = registerForActivityResult(
             new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
             result -> {
@@ -73,18 +72,15 @@ public class MainActivity extends AppCompatActivity {
         Button btnAdd = findViewById(R.id.btnAdd);
         Button btnSend = findViewById(R.id.btnSend);
 
-        // 初始化自定义列表适配器
         adapter = new ScriptAdapter();
         lvScripts.setAdapter(adapter);
 
-        // 点击添加，打开文件选择器
         btnAdd.setOnClickListener(v -> {
             Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
             intent.setType("*/*");
             filePickerLauncher.launch(intent);
         });
 
-        // 底部发送按钮
         btnSend.setOnClickListener(v -> {
             String input = etInput.getText().toString() + "\n";
             if (writer != null) {
@@ -100,7 +96,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // 自定义列表适配器
     private class ScriptAdapter extends ArrayAdapter<String> {
         public ScriptAdapter() {
             super(MainActivity.this, 0, scriptList);
@@ -122,10 +117,8 @@ public class MainActivity extends AppCompatActivity {
 
             tvName.setText(fileName);
 
-            // 点击运行按钮
             btnRun.setOnClickListener(v -> new Thread(() -> runElf(path)).start());
 
-            // 点击删除按钮
             btnDelete.setOnClickListener(v -> {
                 scriptList.remove(position);
                 notifyDataSetChanged();
@@ -141,30 +134,43 @@ public class MainActivity extends AppCompatActivity {
             appendText("\n√ 已获取 root 权限\n");
             appendText("√ busybox 已就绪\n");
             appendText("$ " + new File(scriptPath).getName() + "\n");
-            
+
+            // 🛠️ 修复1：动态寻找 su 的真实路径
+            String suCmd = "su";
+            String[] suPaths = {"/system/bin/su", "/system/xbin/su", "/sbin/su", "/debug_ramdisk/su"};
+            for (String path : suPaths) {
+                if (new File(path).exists()) {
+                    suCmd = path;
+                    break;
+                }
+            }
+
             // 执行脚本
-            process = Runtime.getRuntime().exec(new String[]{"su", "-c", scriptPath});
+            process = Runtime.getRuntime().exec(new String[]{suCmd, "-c", scriptPath});
             writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream()));
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
             String line;
             while ((line = reader.readLine()) != null) {
                 final String out = line;
-                runOnUiThread(() -> appendText(out + "\n"));
+                appendText(out + "\n");
             }
 
             BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
             while ((line = errReader.readLine()) != null) {
                 final String err = line;
-                runOnUiThread(() -> appendText("错误: " + err + "\n"));
+                appendText("错误: " + err + "\n");
             }
         } catch (Exception e) {
-            runOnUiThread(() -> appendText("执行异常: " + e.getMessage() + "\n"));
+            appendText("执行异常: " + e.getMessage() + "\n");
         }
     }
 
+    // 🛠️ 修复2：把 UI 更新强制切换到主线程
     private void appendText(String text) {
-        tvOutput.append(text);
-        scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
+        runOnUiThread(() -> {
+            tvOutput.append(text);
+            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
+        });
     }
 }
