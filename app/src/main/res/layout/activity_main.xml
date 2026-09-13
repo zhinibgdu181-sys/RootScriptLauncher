@@ -46,19 +46,18 @@
             android:backgroundTint="#2196F3" />
     </LinearLayout>
 
-    <!-- 🛠️ 脚本列表：高度占比调整为 50% -->
+    <!-- 🛠️ 核心修改：把列表高度固定为 120dp，不再占屏幕比例 -->
     <ListView
         android:id="@+id/lvScripts"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
+        android:layout_height="120dp"
         android:layout_margin="8dp"
         android:divider="@null"
         android:dividerHeight="8dp"
         android:background="@android:color/transparent"
-        app:layout_constraintHeight_percent="0.5"
         app:layout_constraintTop_toBottomOf="@id/topBar" />
 
-    <!-- 终端输出区（剩余的 50% 空间） -->
+    <!-- 终端输出区（现在它会自动填满列表下方的所有剩余空间，键盘弹出时也能自适应） -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
