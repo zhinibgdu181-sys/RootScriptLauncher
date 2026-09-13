@@ -16,7 +16,6 @@ import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import java.io.BufferedReader;
@@ -41,6 +40,7 @@ public class MainActivity extends AppCompatActivity {
     private BufferedWriter writer;
     private String pendingScriptPath = null;
     private android.content.SharedPreferences prefs;
+    private File busyboxFile; // 用于存放释放出的 busybox
 
     private final androidx.activity.result.ActivityResultLauncher<Intent> filePickerLauncher = registerForActivityResult(
             new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
@@ -82,7 +82,9 @@ public class MainActivity extends AppCompatActivity {
         Button btnAdd = findViewById(R.id.btnAdd);
         Button btnSend = findViewById(R.id.btnSend);
 
-        // 加载历史记录
+        // 🛠️ 释放内置的 busybox 到私有目录
+        extractBusybox();
+
         prefs = getSharedPreferences("script_prefs", MODE_PRIVATE);
         Set<String> savedScripts = prefs.getStringSet("scripts", new HashSet<>());
         scriptList.addAll(savedScripts);
@@ -117,7 +119,24 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // 获取文件真实名字
+    // 🛠️ 从 assets 中提取内置的 busybox
+    private void extractBusybox() {
+        try {
+            busyboxFile = new File(getFilesDir(), "busybox");
+            if (!busyboxFile.exists()) {
+                InputStream is = getAssets().open("busybox");
+                FileOutputStream fos = new FileOutputStream(busyboxFile);
+                byte[] buffer = new byte[8192];
+                int len;
+                while ((len = is.read(buffer)) > 0) fos.write(buffer, 0, len);
+                is.close(); fos.close();
+                Runtime.getRuntime().exec("chmod 755 " + busyboxFile.getAbsolutePath()).waitFor();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     private String getFileName(Uri uri) {
         String result = null;
         if (uri.getScheme().equals("content")) {
@@ -151,13 +170,11 @@ public class MainActivity extends AppCompatActivity {
                 convertView = LayoutInflater.from(getContext()).inflate(R.layout.item_script, parent, false);
             }
             String path = scriptList.get(position);
-            // 👇 关键修改：只显示文件名
             String fileName = new File(path).getName();
             TextView tvName = convertView.findViewById(R.id.tvScriptName);
             Button btnRun = convertView.findViewById(R.id.btnRun);
             Button btnDelete = convertView.findViewById(R.id.btnDelete);
             tvName.setText(fileName);
-            
             btnRun.setOnClickListener(v -> new Thread(() -> runElf(path)).start());
             btnDelete.setOnClickListener(v -> {
                 scriptList.remove(position);
@@ -233,22 +250,14 @@ public class MainActivity extends AppCompatActivity {
                 if (new File(path).exists()) { suCmd = path; break; }
             }
 
-            // 🛠️ 智能分配伪终端 (PTY) 解决盲输问题
-            String[] scriptPaths = {"/system/bin/script", "/system/xbin/script", "/data/data/com.termux/files/usr/bin/script"};
-            String scriptCmd = null;
-            for (String p : scriptPaths) {
-                if (new File(p).exists()) { scriptCmd = p; break; }
-            }
-
+            // 🛠️ 使用内置 busybox 的 script 命令创建伪终端
             String command;
-            if (scriptCmd != null) {
-                // 找到了 script 命令，分配伪终端，菜单会完美显示
-                command = scriptCmd + " -q -c \"" + scriptPath + "\" /dev/null";
-                appendText("√ 已启用虚拟终端模式\n");
+            if (busyboxFile != null && busyboxFile.exists()) {
+                command = busyboxFile.getAbsolutePath() + " script -q -c \"" + scriptPath + "\" /dev/null";
+                appendText("√ 已启用内置虚拟终端\n");
             } else {
-                // 没找到 script，只能直接运行，如果卡住需要用户盲输
                 command = scriptPath;
-                appendText("√ 系统无 script 命令，若卡住请输入 1 并发送\n");
+                appendText("⚠️ 虚拟终端释放失败，尝试直接运行\n");
             }
 
             ProcessBuilder pb = new ProcessBuilder(suCmd, "-c", command);
