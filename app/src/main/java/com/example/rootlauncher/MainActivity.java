@@ -34,7 +34,7 @@ public class MainActivity extends AppCompatActivity {
     private ScriptAdapter adapter;
     private Process process;
     private BufferedWriter writer;
-    private String pendingScriptPath = null; // 用于记录等待运行脚本的路径
+    private String pendingScriptPath = null;
 
     private final androidx.activity.result.ActivityResultLauncher<Intent> filePickerLauncher = registerForActivityResult(
             new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
@@ -94,6 +94,13 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+
+        // 🛠️ 【新增需求】一打开软件就检测 Root 权限
+        new Thread(() -> {
+            if (!checkRoot()) {
+                showRootDialog();
+            }
+        }).start();
     }
 
     private class ScriptAdapter extends ArrayAdapter<String> {
@@ -122,7 +129,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 🛠️ 检测 Root 权限
     private boolean checkRoot() {
         try {
             String suCmd = "su";
@@ -142,14 +148,12 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 🛠️ 实现你截图里的那个“需要 root 权限”弹窗
     private void showRootDialog() {
         runOnUiThread(() -> {
             new AlertDialog.Builder(MainActivity.this)
                 .setTitle("需要 root 权限")
                 .setMessage("本软件需要 root 权限才能执行脚本。\n\n请打开你的 Root 管理器\n(KernelSU / Magisk)\n在超级用户列表里允许本应用，\n然后回到这里点「重试」。")
                 .setPositiveButton("重试", (dialog, which) -> {
-                    // 重新检测
                     new Thread(() -> {
                         if (checkRoot()) {
                             appendText("√ 已获取 root 权限\n");
@@ -158,7 +162,7 @@ public class MainActivity extends AppCompatActivity {
                                 pendingScriptPath = null;
                             }
                         } else {
-                            showRootDialog(); // 还是没给权限，继续弹
+                            showRootDialog();
                         }
                     }).start();
                 })
@@ -169,9 +173,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void runElf(String scriptPath) {
-        // 先检测权限
         if (!checkRoot()) {
-            pendingScriptPath = scriptPath; // 记录一下，等用户授权后直接运行
+            pendingScriptPath = scriptPath;
             showRootDialog();
             return;
         }
@@ -179,7 +182,6 @@ public class MainActivity extends AppCompatActivity {
         runElfReal(scriptPath);
     }
 
-    // 真正执行脚本的逻辑
     private void runElfReal(String scriptPath) {
         try {
             appendText("√ busybox 已就绪\n");
@@ -191,16 +193,21 @@ public class MainActivity extends AppCompatActivity {
                 if (new File(path).exists()) { suCmd = path; break; }
             }
 
-            // 🛠️ 核心：使用 script -q -c 分配伪终端(PTY)
-            // 这样脚本会以为自己在真实的终端里，菜单就会完整打印出来，完美解决“盲输”问题
-            String command = "script -q -c \"sh " + scriptPath + "\" /dev/null";
+            // 🛠️ 【修复盲输与script报错】优先使用 App 准备好的 busybox 里的 script 命令
+            String busyboxPath = "/data/local/tmp/root-runner-busybox";
+            if (!new File(busyboxPath).exists()) {
+                // 如果不在默认路径，尝试去系统路径找 busybox
+                busyboxPath = "busybox";
+            }
+            
+            // 使用 busybox script 分配伪终端 (PTY)
+            String command = busyboxPath + " script -q -c \"sh " + scriptPath + "\" /dev/null";
 
             ProcessBuilder pb = new ProcessBuilder(suCmd, "-c", command);
             pb.redirectErrorStream(true);
             process = pb.start();
             writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream()));
 
-            // 逐字符读取，实时刷新界面
             new Thread(() -> {
                 try {
                     BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
