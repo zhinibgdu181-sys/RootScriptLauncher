@@ -55,7 +55,7 @@
         android:divider="@null"
         android:dividerHeight="8dp"
         android:background="@android:color/transparent"
-        app:layout_constraintHeight_percent="0.6"
+        app:layout_constraintHeight_percent="0.55"
         app:layout_constraintTop_toBottomOf="@id/topBar" />
 
     <!-- 终端输出区：占据剩余的空间 -->
