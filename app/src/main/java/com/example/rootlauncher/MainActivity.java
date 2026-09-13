@@ -82,8 +82,6 @@ public class MainActivity extends AppCompatActivity {
         Button btnAdd = findViewById(R.id.btnAdd);
         Button btnSend = findViewById(R.id.btnSend);
 
-        extractBusybox();
-
         prefs = getSharedPreferences("script_prefs", MODE_PRIVATE);
         Set<String> savedScripts = prefs.getStringSet("scripts", new HashSet<>());
         scriptList.addAll(savedScripts);
@@ -118,7 +116,8 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    private void extractBusybox() {
+    // 🛠️ 将释放动作放到这里，每次运行前重新检查并复制
+    private boolean extractAndPrepareBusybox() {
         try {
             File tempFile = new File(getFilesDir(), "busybox_temp");
             if (!tempFile.exists()) {
@@ -130,12 +129,18 @@ public class MainActivity extends AppCompatActivity {
                 is.close(); fos.close();
             }
             
-            // 🛠️ 关键：SELinux 禁止从 /data/data/ 执行二进制，必须复制到 /data/local/tmp/
             busyboxFile = new File("/data/local/tmp/root_launcher_busybox");
+            
+            // 如果之前复制过，并且还在，直接返回成功
+            if (busyboxFile.exists()) return true;
+
+            // 使用 su 权限重新复制，并加长等待时间
             Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "cp " + tempFile.getAbsolutePath() + " " + busyboxFile.getAbsolutePath() + " && chmod 755 " + busyboxFile.getAbsolutePath()});
             p.waitFor();
+            
+            return busyboxFile.exists();
         } catch (Exception e) {
-            e.printStackTrace();
+            return false;
         }
     }
 
@@ -252,14 +257,16 @@ public class MainActivity extends AppCompatActivity {
                 if (new File(path).exists()) { suCmd = path; break; }
             }
 
+            // 🛠️ 核心：每次运行前，强制重新提取一次 busybox，防止启动时权限被拒
+            boolean isBusyboxReady = extractAndPrepareBusybox();
+
             String command;
-            if (busyboxFile != null && busyboxFile.exists()) {
-                // 使用单引号包裹路径，防止转义引发的换行问题
+            if (isBusyboxReady && busyboxFile.exists()) {
                 command = busyboxFile.getAbsolutePath() + " script -q -c '" + scriptPath + "' /dev/null";
                 appendText("√ 已启用内置虚拟终端\n");
             } else {
                 command = scriptPath;
-                appendText("⚠️ 虚拟终端释放失败，尝试直接运行\n");
+                appendText("⚠️ 虚拟终端释放失败，请退出 App 重新打开，并在弹窗中给予 Root 权限！\n");
             }
 
             ProcessBuilder pb = new ProcessBuilder(suCmd, "-c", command);
