@@ -95,7 +95,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 一打开软件就检测 Root 权限
         new Thread(() -> {
             if (!checkRoot()) {
                 showRootDialog();
@@ -193,9 +192,9 @@ public class MainActivity extends AppCompatActivity {
                 if (new File(path).exists()) { suCmd = path; break; }
             }
 
-            // 🛠️ 终极修复：放弃 busybox，直接使用 Android 自带的 sh 运行脚本
-            // 配合下方的“逐字符读取”，能最大限度地把脚本输出实时展现出来
-            String command = "sh " + scriptPath;
+            // 🛠️ 终极修复：因为它是 ELF 文件，所以直接执行它自己！
+            // 不要加 sh，加了就会报语法错误！
+            String command = scriptPath;
 
             ProcessBuilder pb = new ProcessBuilder(suCmd, "-c", command);
             pb.redirectErrorStream(true);
