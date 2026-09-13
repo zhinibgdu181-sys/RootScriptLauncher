@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "RootScriptLauncher"
-include ':app'
+include ':app'   // 👈 检查这里！冒号和引号必须是英文，app 必须全小写
