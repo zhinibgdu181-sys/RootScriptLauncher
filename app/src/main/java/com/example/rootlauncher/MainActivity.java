@@ -107,6 +107,9 @@ public class MainActivity extends AppCompatActivity {
         Set<String> savedScripts = prefs.getStringSet("scripts", new HashSet<>());
         scriptList.addAll(savedScripts);
 
+        // 🛠️ 核心：自动提取安装包内的脚本
+        extractDefaultScript();
+
         adapter = new ScriptAdapter();
         lvScripts.setAdapter(adapter);
 
@@ -145,6 +148,49 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
+    // 🛠️ 从 assets 提取预设脚本到私有目录，并加入列表
+    // ============================================================
+    private void extractDefaultScript() {
+        // 用 SharedPreferences 记录是否已经添加过，防止用户删掉后重启又自动出现
+        boolean isAdded = prefs.getBoolean("isDefaultScriptAdded", false);
+        if (isAdded) return;
+
+        String scriptName = "Kairos_Driver_Loader_Release_90f76e9.sh";
+        File destFile = new File(getFilesDir(), scriptName);
+
+        try {
+            // 从 assets 复制
+            if (!destFile.exists()) {
+                InputStream is = getAssets().open(scriptName);
+                FileOutputStream fos = new FileOutputStream(destFile);
+                byte[] buffer = new byte[8192];
+                int len;
+                while ((len = is.read(buffer)) > 0) {
+                    fos.write(buffer, 0, len);
+                }
+                is.close();
+                fos.close();
+
+                Process chmod = new ProcessBuilder("chmod", "755", destFile.getAbsolutePath())
+                        .redirectErrorStream(true).start();
+                chmod.waitFor();
+            }
+
+            // 检查列表里有没有，没有就加进去
+            if (!scriptList.contains(destFile.getAbsolutePath())) {
+                scriptList.add(destFile.getAbsolutePath());
+                saveScripts();
+            }
+
+            // 标记已添加
+            prefs.edit().putBoolean("isDefaultScriptAdded", true).apply();
+
+        } catch (Exception e) {
+            // 如果 assets 里没有这个文件，忽略即可，不影响用户手动添加
+        }
+    }
+
+    // ============================================================
     // 🛠️ 键盘监听：弹出键盘时缩小列表至 15%，收回键盘恢复 55%
     // ============================================================
     private void setKeyboardListener() {
@@ -162,10 +208,8 @@ public class MainActivity extends AppCompatActivity {
                 if (isShowing != isKeyboardVisible) {
                     isKeyboardVisible = isShowing;
                     if (isKeyboardVisible) {
-                        // 键盘弹出：列表缩小到 15%，把空间留给终端
                         updateListHeight(0.15f);
                     } else {
-                        // 键盘收起：恢复列表 55% 的空间
                         updateListHeight(0.55f);
                     }
                 }
