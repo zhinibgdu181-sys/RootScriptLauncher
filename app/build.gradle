@@ -18,10 +18,17 @@ android {
             minifyEnabled false
         }
     }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
 }
 
 dependencies {
+    // 👇 重点：这个 Kotlin BOM 强制统一所有 Kotlin 库的版本为 1.8.10，解决打架报错
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.10')
+
     implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'androidx.activity:activity:1.7.2' // 必须加这一行，否则文件选择器会报错
+    implementation 'androidx.activity:activity:1.7.2'
     implementation 'com.google.android.material:material:1.9.0'
 }
