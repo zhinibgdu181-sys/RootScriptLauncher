@@ -2,34 +2,54 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:background="#F5F5F5">
 
-    <!-- 顶部栏 -->
+    <!-- 顶部标题栏 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp">
-        <TextView
+        android:padding="16dp"
+        android:gravity="center_vertical"
+        android:background="#FFFFFF">
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Root 脚本启动器"
-            android:textSize="20sp"
-            android:textStyle="bold" />
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Root 脚本启动器"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:textColor="#333333" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ROOT SCRIPT LAUNCHER"
+                android:textSize="12sp"
+                android:textColor="#999999" />
+        </LinearLayout>
         <Button
             android:id="@+id/btnAdd"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="+ 添加" />
+            android:text="+ 添加"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#2196F3" />
     </LinearLayout>
 
-    <!-- 脚本列表 -->
+    <!-- 脚本列表（固定高度，呈现卡片感） -->
     <ListView
         android:id="@+id/lvScripts"
         android:layout_width="match_parent"
-        android:layout_height="150dp"
-        android:background="#F0F0F0" />
+        android:layout_height="200dp"
+        android:layout_margin="8dp"
+        android:divider="@null"
+        android:dividerHeight="8dp"
+        android:background="@android:color/transparent" />
 
     <!-- 终端输出区 -->
     <ScrollView
@@ -44,8 +64,9 @@
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
             android:textColor="#00FF00"
-            android:padding="8dp"
-            android:text="请点击上方“+ 添加”选择脚本。" />
+            android:padding="12dp"
+            android:textSize="13sp"
+            android:text="请点击上方「+ 添加」选择脚本。\n" />
     </ScrollView>
 
     <!-- 底部输入区 -->
@@ -53,17 +74,36 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:padding="8dp"
+        android:background="#1A1A1A"
+        android:gravity="center_vertical">
+        
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="$"
+            android:textColor="#00FF00"
+            android:textSize="18sp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
         <EditText
             android:id="@+id/etInput"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="输入 1 或 2 后发送" />
+            android:hint="输入命令 / 选项后回车"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#666666"
+            android:backgroundTint="#333333"
+            android:inputType="text" />
+
         <Button
             android:id="@+id/btnSend"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="发送" />
+            android:text="发送"
+            android:backgroundTint="#2196F3"
+            android:textColor="#FFFFFF" />
     </LinearLayout>
 </LinearLayout>
