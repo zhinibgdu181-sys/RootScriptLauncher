@@ -1,23 +1,122 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F5F5F5"
+    android:fitsSystemWindows="true">
 
-    <!-- 联网权限 -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 顶部标题栏 -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:gravity="center_vertical"
+        android:background="#FFFFFF"
+        app:layout_constraintTop_toTopOf="parent">
 
-    <application
-        android:allowBackup="true"
-        android:label="Root脚本启动器"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:windowSoftInputMode="adjustResize"> <!-- 核心：键盘弹起时压缩界面 -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Root 脚本启动器"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:textColor="#333333" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ROOT SCRIPT LAUNCHER"
+                android:textSize="12sp"
+                android:textColor="#999999" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnAdd"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:text="+ 添加"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#2196F3" />
+    </LinearLayout>
+
+    <!-- 脚本列表 -->
+    <ListView
+        android:id="@+id/lvScripts"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_margin="8dp"
+        android:divider="@null"
+        android:dividerHeight="8dp"
+        android:background="@android:color/transparent"
+        app:layout_constraintHeight_percent="0.35"
+        app:layout_constraintTop_toBottomOf="@id/topBar" />
+
+    <!-- 终端输出区 -->
+    <ScrollView
+        android:id="@+id/scrollView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:background="#111111"
+        app:layout_constraintBottom_toTopOf="@+id/bottomBar"
+        app:layout_constraintTop_toBottomOf="@id/lvScripts">
+
+        <TextView
+            android:id="@+id/tvOutput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="#00FF00"
+            android:textSize="13sp"
+            android:padding="12dp"
+            android:text="请点击上方「+ 添加」选择脚本。" />
+    </ScrollView>
+
+    <!-- 底部输入区 -->
+    <LinearLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        android:background="#1A1A1A"
+        android:gravity="center_vertical"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="$"
+            android:textColor="#00FF00"
+            android:textSize="18sp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <EditText
+            android:id="@+id/etInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="输入命令 / 选项后回车"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#666666"
+            android:backgroundTint="#333333"
+            android:inputType="text" />
+
+        <Button
+            android:id="@+id/btnSend"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="发送"
+            android:layout_marginStart="8dp"
+            android:backgroundTint="#2196F3"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
