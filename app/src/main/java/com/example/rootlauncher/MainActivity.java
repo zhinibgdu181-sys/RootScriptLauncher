@@ -50,8 +50,7 @@ public class MainActivity extends AppCompatActivity {
     private String pendingScriptPath = null;
     private android.content.SharedPreferences prefs;
     private File busyboxFile;
-    
-    // 🛠️ 用于记录键盘是否弹出的状态
+
     private boolean isKeyboardVisible = false;
 
     private final androidx.activity.result.ActivityResultLauncher<Intent> filePickerLauncher =
@@ -136,7 +135,6 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {}
         });
 
-        // 🛠️ 核心：初始化键盘监听，动态调整布局比例
         setKeyboardListener();
 
         new Thread(() -> {
@@ -147,7 +145,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // 🛠️ 键盘监听：键盘弹出时缩小列表，键盘收起时恢复 60%
+    // 🛠️ 键盘监听：弹出键盘时缩小列表至 15%，收回键盘恢复 55%
     // ============================================================
     private void setKeyboardListener() {
         final View rootView = findViewById(android.R.id.content);
@@ -159,24 +157,22 @@ public class MainActivity extends AppCompatActivity {
                 int screenHeight = rootView.getRootView().getHeight();
                 int keypadHeight = screenHeight - r.bottom;
 
-                // 如果键盘高度超过屏幕高度的 15%，认为键盘弹出了
                 boolean isShowing = keypadHeight > screenHeight * 0.15;
 
                 if (isShowing != isKeyboardVisible) {
                     isKeyboardVisible = isShowing;
                     if (isKeyboardVisible) {
-                        // 键盘弹出：把列表缩小到 15%，把空间留给终端
+                        // 键盘弹出：列表缩小到 15%，把空间留给终端
                         updateListHeight(0.15f);
                     } else {
-                        // 键盘收起：恢复列表 60% 的空间
-                        updateListHeight(0.6f);
+                        // 键盘收起：恢复列表 55% 的空间
+                        updateListHeight(0.55f);
                     }
                 }
             }
         });
     }
 
-    // 动态修改 ListView 的高度比例
     private void updateListHeight(float percent) {
         runOnUiThread(() -> {
             try {
@@ -229,7 +225,7 @@ public class MainActivity extends AppCompatActivity {
             StringBuilder output = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) output.append(line);
-            
+
             int exitCode = p.waitFor();
             return exitCode == 0 && output.toString().contains("uid=0");
         } catch (Exception e) {
@@ -509,4 +505,4 @@ public class MainActivity extends AppCompatActivity {
         writer = null;
         process = null;
     }
-    }
+}
