@@ -41,7 +41,6 @@ public class MainActivity extends AppCompatActivity {
     private volatile BufferedWriter writer;
     private String pendingScriptPath = null;
     private android.content.SharedPreferences prefs;
-
     private File busyboxFile;
 
     private final androidx.activity.result.ActivityResultLauncher<Intent> filePickerLauncher = registerForActivityResult(
@@ -112,28 +111,59 @@ public class MainActivity extends AppCompatActivity {
             filePickerLauncher.launch(intent);
         });
 
+        // 底部发送按钮：如果没脚本在跑，就直接执行命令
         btnSend.setOnClickListener(v -> {
             String input = etInput.getText().toString();
             if (input.length() == 0) return;
+
+            if (writer == null) {
+                // 没有脚本在运行，输入框内容当作终端命令执行
+                executeCommand(input);
+                return;
+            }
+
+            // 有脚本在运行，就把内容发送给脚本
             input += "\n";
-            BufferedWriter currentWriter = writer;
-            if (currentWriter != null) {
-                try {
-                    currentWriter.write(input);
-                    currentWriter.flush();
-                    etInput.setText("");
-                    appendText(">>> " + input);
-                } catch (Exception e) {
-                    appendText("❌ 输入失败: " + e.getMessage() + "\n");
-                }
-            } else {
-                appendText("⚠ 当前没有正在运行的程序\n");
+            try {
+                writer.write(input);
+                writer.flush();
+                etInput.setText("");
+                appendText(">>> " + input);
+            } catch (Exception e) {
+                appendText("❌ 输入失败: " + e.getMessage() + "\n");
             }
         });
 
         new Thread(() -> {
             if (!checkRoot()) {
                 showRootDialog();
+            }
+        }).start();
+    }
+
+    // 🛠️ 直接执行终端命令的方法（用于输入框测试网络等）
+    private void executeCommand(String cmd) {
+        etInput.setText("");
+        appendText("$ " + cmd + "\n");
+        new Thread(() -> {
+            try {
+                ProcessBuilder pb = new ProcessBuilder(findSu(), "-c", cmd);
+                pb.redirectErrorStream(true);
+                Process p = pb.start();
+                
+                BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+                char[] buffer = new char[1024];
+                int count;
+                while ((count = reader.read(buffer)) != -1) {
+                    if (count <= 0) continue;
+                    final String rawOutput = new String(buffer, 0, count);
+                    final String cleanOutput = rawOutput.replaceAll("\u001B\\[[0-9;]*[A-Za-z]", "");
+                    runOnUiThread(() -> appendText(cleanOutput));
+                }
+                int exitCode = p.waitFor();
+                runOnUiThread(() -> appendText("\n[命令结束，状态码: " + exitCode + "]\n"));
+            } catch (Exception e) {
+                runOnUiThread(() -> appendText("❌ 执行失败: " + e.getMessage() + "\n"));
             }
         }).start();
     }
@@ -236,11 +266,7 @@ public class MainActivity extends AppCompatActivity {
                     while ((count = reader.read(buffer)) != -1) {
                         if (count <= 0) continue;
                         final String rawOutput = new String(buffer, 0, count);
-                        
-                        // 🛠️ 修复：使用正则表达式去除 ANSI 颜色控制码（例如 [1;32m 和 [0m）
-                        // \u001B 是 ESC 键的转义字符，配合后面的 [ 和字母，即可完整匹配颜色代码
                         final String cleanOutput = rawOutput.replaceAll("\u001B\\[[0-9;]*[A-Za-z]", "");
-                        
                         runOnUiThread(() -> appendText(cleanOutput));
                     }
                     int exitCode = currentProcess.waitFor();
@@ -389,4 +415,4 @@ public class MainActivity extends AppCompatActivity {
         writer = null;
         process = null;
     }
-                }
+}
