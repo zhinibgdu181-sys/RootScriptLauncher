@@ -48,9 +48,7 @@ public class MainActivity extends AppCompatActivity {
                         int len;
                         while ((len = is.read(buffer)) > 0) fos.write(buffer, 0, len);
                         is.close(); fos.close();
-
                         Runtime.getRuntime().exec("chmod 755 " + destFile.getAbsolutePath()).waitFor();
-
                         scriptList.add(destFile.getAbsolutePath());
                         adapter.notifyDataSetChanged();
                         appendText("√ 已添加脚本: " + destFile.getName() + "\n");
@@ -100,73 +98,106 @@ public class MainActivity extends AppCompatActivity {
         public ScriptAdapter() {
             super(MainActivity.this, 0, scriptList);
         }
-
         @NonNull
         @Override
         public View getView(int position, View convertView, @NonNull ViewGroup parent) {
             if (convertView == null) {
                 convertView = LayoutInflater.from(getContext()).inflate(R.layout.item_script, parent, false);
             }
-            
             String path = scriptList.get(position);
             String fileName = new File(path).getName();
-
             TextView tvName = convertView.findViewById(R.id.tvScriptName);
             Button btnRun = convertView.findViewById(R.id.btnRun);
             Button btnDelete = convertView.findViewById(R.id.btnDelete);
-
             tvName.setText(fileName);
-
             btnRun.setOnClickListener(v -> new Thread(() -> runElf(path)).start());
-
             btnDelete.setOnClickListener(v -> {
                 scriptList.remove(position);
                 notifyDataSetChanged();
                 appendText("X 已移除脚本: " + fileName + "\n");
             });
-
             return convertView;
+        }
+    }
+
+    // 🛠️ 新增：检测 Root 权限的方法
+    private boolean checkRoot() {
+        try {
+            String suCmd = "su";
+            String[] suPaths = {"/system/bin/su", "/system/xbin/su", "/sbin/su", "/debug_ramdisk/su"};
+            for (String path : suPaths) {
+                if (new File(path).exists()) { suCmd = path; break; }
+            }
+            
+            // 执行 su -c id 来获取当前用户信息
+            Process p = Runtime.getRuntime().exec(new String[]{suCmd, "-c", "id"});
+            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            p.waitFor();
+            // 如果输出里包含 uid=0，说明获取到了真正的 Root 权限
+            return sb.toString().contains("uid=0");
+        } catch (Exception e) {
+            return false;
         }
     }
 
     private void runElf(String scriptPath) {
         try {
+            // 1. 先检查 Root 权限
+            if (!checkRoot()) {
+                appendText("错误: 未获取到 Root 权限，请确认手机已 Root 并在弹窗中允许！\n");
+                return;
+            }
             appendText("\n√ 已获取 root 权限\n");
             appendText("√ busybox 已就绪\n");
             appendText("$ " + new File(scriptPath).getName() + "\n");
 
-            // 🛠️ 修复1：动态寻找 su 的真实路径
             String suCmd = "su";
             String[] suPaths = {"/system/bin/su", "/system/xbin/su", "/sbin/su", "/debug_ramdisk/su"};
             for (String path : suPaths) {
-                if (new File(path).exists()) {
-                    suCmd = path;
-                    break;
-                }
+                if (new File(path).exists()) { suCmd = path; break; }
             }
 
-            // 执行脚本
-            process = Runtime.getRuntime().exec(new String[]{suCmd, "-c", scriptPath});
+            // 2. 将 stderr 合并到 stdout，防止读取线程卡死
+            ProcessBuilder pb = new ProcessBuilder(suCmd, "-c", scriptPath);
+            pb.redirectErrorStream(true);
+            process = pb.start();
             writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream()));
 
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                final String out = line;
-                appendText(out + "\n");
-            }
+            // 3. 逐字符读取输出（完美解决不换行导致界面卡死的问题）
+            new Thread(() -> {
+                try {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                    int c;
+                    StringBuilder sb = new StringBuilder();
+                    while ((c = reader.read()) != -1) {
+                        if (c == '\n') {
+                            final String line = sb.toString();
+                            runOnUiThread(() -> appendText(line + "\n"));
+                            sb.setLength(0);
+                        } else {
+                            sb.append((char) c);
+                        }
+                    }
+                    // 输出最后一行（如果最后没有换行符）
+                    if (sb.length() > 0) {
+                        final String line = sb.toString();
+                        runOnUiThread(() -> appendText(line));
+                    }
+                } catch (Exception e) {
+                    runOnUiThread(() -> appendText("读取错误: " + e.getMessage() + "\n"));
+                }
+            }).start();
 
-            BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
-            while ((line = errReader.readLine()) != null) {
-                final String err = line;
-                appendText("错误: " + err + "\n");
-            }
         } catch (Exception e) {
             appendText("执行异常: " + e.getMessage() + "\n");
         }
     }
 
-    // 🛠️ 修复2：把 UI 更新强制切换到主线程
     private void appendText(String text) {
         runOnUiThread(() -> {
             tvOutput.append(text);
