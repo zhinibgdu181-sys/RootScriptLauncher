@@ -22,10 +22,10 @@ jobs:
     - name: Download static busybox to assets
       run: |
         mkdir -p app/src/main/assets
-        # 换用绝对可靠的 aarch64 静态 busybox
-        curl -L -o app/src/main/assets/busybox https://busybox.net/downloads/binaries/1.35.0-aarch64-linux-musl/busybox
+        # 使用 BusyBox 官方唯一的静态 ARM64 链接，绝对稳定
+        curl -fL -o app/src/main/assets/busybox https://busybox.net/downloads/binaries/1.35.0-armv8l-linux-musleabihf/busybox
+        if [ ! -s app/src/main/assets/busybox ]; then echo "下载失败，终止构建"; exit 1; fi
         chmod +x app/src/main/assets/busybox
-        # 打印文件信息，方便排查
         file app/src/main/assets/busybox
         ls -lh app/src/main/assets/busybox
 
