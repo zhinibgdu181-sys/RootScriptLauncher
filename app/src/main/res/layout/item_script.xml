@@ -15,7 +15,6 @@
         android:padding="12dp"
         android:gravity="center_vertical">
 
-        <!-- 文件图标 -->
         <TextView
             android:layout_width="40dp"
             android:layout_height="40dp"
@@ -26,7 +25,6 @@
             android:background="#4FC3F7"
             android:layout_marginEnd="12dp" />
 
-        <!-- 文件名 -->
         <TextView
             android:id="@+id/tvScriptName"
             android:layout_width="0dp"
@@ -38,7 +36,6 @@
             android:maxLines="1"
             android:ellipsize="middle" />
 
-        <!-- 删除按钮 -->
         <Button
             android:id="@+id/btnDelete"
             android:layout_width="40dp"
@@ -48,7 +45,6 @@
             android:textColor="#666666"
             android:layout_marginEnd="8dp" />
 
-        <!-- 运行按钮 -->
         <Button
             android:id="@+id/btnRun"
             android:layout_width="40dp"
