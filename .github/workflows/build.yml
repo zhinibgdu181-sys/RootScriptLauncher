@@ -19,6 +19,12 @@ jobs:
       with:
         gradle-version: 8.4
 
+    - name: Download static busybox to assets
+      run: |
+        mkdir -p app/src/main/assets
+        curl -L -o app/src/main/assets/busybox https://busybox.net/downloads/binaries/1.35.0-armv8l-linux-musleabihf/busybox
+        chmod +x app/src/main/assets/busybox
+
     - name: Build Debug APK
       run: gradle assembleDebug
 
