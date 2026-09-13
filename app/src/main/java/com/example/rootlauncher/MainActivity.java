@@ -119,33 +119,33 @@ public class MainActivity extends AppCompatActivity {
     private boolean extractAndPrepareBusybox() {
         try {
             File tempFile = new File(getFilesDir(), "busybox_temp");
-            // 如果临时文件不存在或者太小（说明是下载错误的网页），则重新从 assets 提取
-            if (!tempFile.exists() || tempFile.length() < 100000) {
-                InputStream is = getAssets().open("busybox");
-                FileOutputStream fos = new FileOutputStream(tempFile);
-                byte[] buffer = new byte[8192];
-                int len;
-                while ((len = is.read(buffer)) > 0) fos.write(buffer, 0, len);
-                is.close(); fos.close();
-            }
-            
-            // 如果提取出来的文件依然太小，说明 assets 里的源文件就是坏的
+            // 强制从 assets 提取最新文件
+            InputStream is = getAssets().open("busybox");
+            FileOutputStream fos = new FileOutputStream(tempFile);
+            byte[] buffer = new byte[8192];
+            int len;
+            while ((len = is.read(buffer)) > 0) fos.write(buffer, 0, len);
+            is.close(); fos.close();
+
             if (tempFile.length() < 100000) {
+                appendText("⚠ 错误：assets里的busybox文件太小，下载可能失败了！\n");
                 return false;
             }
 
             busyboxFile = new File("/data/local/tmp/root_launcher_busybox");
-            // 如果目标已经存在且大小正常，直接使用
-            if (busyboxFile.exists() && busyboxFile.length() > 100000) return true;
-
-            // 使用 su 复制并强制重新赋权
-            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", 
-                "cp " + tempFile.getAbsolutePath() + " " + busyboxFile.getAbsolutePath() + 
-                " && chmod 755 " + busyboxFile.getAbsolutePath()});
+            
+            // 终极修复：使用 cat + chcon 命令
+            // cp 命令在某些 SELinux 策略下会失败，使用 cat 重定向并强制修改安全上下文
+            String cmd = "cat " + tempFile.getAbsolutePath() + " > " + busyboxFile.getAbsolutePath() + 
+                         " && chmod 755 " + busyboxFile.getAbsolutePath() + 
+                         " && chcon u:object_r:shell_exec:s0 " + busyboxFile.getAbsolutePath();
+            
+            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
             p.waitFor();
             
             return busyboxFile.exists() && busyboxFile.length() > 100000;
         } catch (Exception e) {
+            appendText("提取异常: " + e.getMessage() + "\n");
             return false;
         }
     }
@@ -270,8 +270,9 @@ public class MainActivity extends AppCompatActivity {
                 command = busyboxFile.getAbsolutePath() + " script -q -c '" + scriptPath + "' /dev/null";
                 appendText("√ 已启用内置虚拟终端\n");
             } else {
-                command = scriptPath;
-                appendText("⚠️ 虚拟终端释放失败，请退出 App 重新打开并授权 Root！\n");
+                // 如果这次仍然失败，不要静默退化成盲输，直接把原因显示出来
+                appendText("❌ 虚拟终端初始化失败！请确认手机已Root且授予了权限。\n");
+                return;
             }
 
             ProcessBuilder pb = new ProcessBuilder(suCmd, "-c", command);
