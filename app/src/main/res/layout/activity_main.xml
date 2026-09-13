@@ -46,7 +46,7 @@
             android:backgroundTint="#2196F3" />
     </LinearLayout>
 
-    <!-- 脚本列表 -->
+    <!-- 🛠️ 脚本列表：高度占比调整为 50% -->
     <ListView
         android:id="@+id/lvScripts"
         android:layout_width="match_parent"
@@ -55,10 +55,10 @@
         android:divider="@null"
         android:dividerHeight="8dp"
         android:background="@android:color/transparent"
-        app:layout_constraintHeight_percent="0.35"
+        app:layout_constraintHeight_percent="0.5"
         app:layout_constraintTop_toBottomOf="@id/topBar" />
 
-    <!-- 终端输出区 -->
+    <!-- 终端输出区（剩余的 50% 空间） -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
@@ -119,4 +119,5 @@
             android:backgroundTint="#2196F3"
             android:textColor="#FFFFFF" />
     </LinearLayout>
+
 </androidx.constraintlayout.widget.ConstraintLayout>
