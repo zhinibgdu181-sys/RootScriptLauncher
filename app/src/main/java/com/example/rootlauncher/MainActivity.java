@@ -2,6 +2,9 @@ package com.example.rootlauncher;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Rect;
@@ -160,6 +163,12 @@ public class MainActivity extends AppCompatActivity {
         Button btnAdd = findViewById(R.id.btnAdd);
         Button btnSend = findViewById(R.id.btnSend);
 
+        // ★★★ 核心新增：长按终端区域，弹出复制菜单 ★★★
+        tvOutput.setOnLongClickListener(v -> {
+            showTerminalOptions();
+            return true;
+        });
+
         prefs = getSharedPreferences("script_prefs", MODE_PRIVATE);
 
         Set<String> savedScripts = prefs.getStringSet("scripts", new HashSet<>());
@@ -204,6 +213,41 @@ public class MainActivity extends AppCompatActivity {
                 executeCommand(input);
             }
         });
+    }
+
+    // ★★★ 终端操作菜单 ★★★
+    private void showTerminalOptions() {
+        String[] options = {"复制全部", "清空终端"};
+        new AlertDialog.Builder(this)
+                .setTitle("终端操作")
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        copyTerminalText();
+                    } else if (which == 1) {
+                        if (tvOutput != null) {
+                            tvOutput.setText("");
+                            appendText("[提示] 终端已清空\n");
+                        }
+                    }
+                })
+                .show();
+    }
+
+    // ★★★ 复制终端文本到剪贴板 ★★★
+    private void copyTerminalText() {
+        if (tvOutput == null) return;
+        String text = tvOutput.getText().toString();
+        if (text.isEmpty()) {
+            appendText("[提示] 终端内容为空\n");
+            return;
+        }
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm != null) {
+            cm.setPrimaryClip(ClipData.newPlainText("terminal_output", text));
+            appendText("[+] 终端内容已复制到剪贴板\n");
+        } else {
+            appendText("[-] 剪贴板服务不可用\n");
+        }
     }
 
     private void setupKeyboardListener() {
@@ -417,9 +461,6 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // ============================================================
-    // ★ 核心：自动检测 ELF 依赖，智能选择运行模式
-    // ============================================================
     private void runElfReal(String scriptPath) {
         stopCurrentElf();
         try {
@@ -456,24 +497,19 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // 准备 BusyBox（自动检测依赖需要用到 busybox 的 grep 功能）
             if (!extractAndPrepareBusybox()) {
                 appendText("[ELF] APK 内置 BusyBox 初始化失败\n");
                 return;
             }
 
-            // ★★★ 核心自动检测逻辑 ★★★
-            // 检查 ELF 文件是否依赖 libandroid.so
-            // 图形界面程序依赖 libandroid.so，控制台脚本则没有
             boolean usePty = true;
             try {
-                // 使用 busybox grep -a 扫描二进制文件中是否存在 libandroid.so
                 String grepCmd = shellQuote(RUNTIME_BUSYBOX) + " grep -a -q 'libandroid.so' " + shellQuote(runtimePath);
                 Process grepProcess = new ProcessBuilder(findSu(), "-c", grepCmd).redirectErrorStream(true).start();
                 int grepExit = grepProcess.waitFor();
                 
                 if (grepExit == 0) {
-                    usePty = false; // 找到了 libandroid.so，是图形程序，走直连
+                    usePty = false; 
                     appendText("[自动检测] 检测到 libandroid.so，使用直连模式\n");
                 } else {
                     appendText("[自动检测] 未检测到图形库，使用交互模式 (PTY)\n");
@@ -481,7 +517,6 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception e) {
                 appendText("[自动检测] 检测失败，默认使用交互模式 (PTY)\n");
             }
-            // ★★★ 检测结束 ★★★
 
             String suCmd = findSu();
             String elfDir = elf.getParent();
@@ -497,10 +532,8 @@ public class MainActivity extends AppCompatActivity {
             String command;
 
             if (usePty) {
-                // 交互模式：套 PTY
                 command = env + shellQuote(RUNTIME_BUSYBOX) + " script -q -c " + shellQuote(elfCommand) + " /dev/null";
             } else {
-                // 直连模式：直接执行
                 command = env + elfCommand;
             }
 
@@ -828,4 +861,4 @@ public class MainActivity extends AppCompatActivity {
         stopCurrentElf();
         super.onDestroy();
     }
-                }
+                                                           }
