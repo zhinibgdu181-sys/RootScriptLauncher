@@ -11,6 +11,7 @@ import android.util.Base64;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -42,8 +43,7 @@ public class MainActivity extends AppCompatActivity {
             "TIME_Cloud_Loader_Release_1732727.sh"
     };
 
-    // ★★★ 签名校验（默认占位符会放行）★★★
-    // 等你用 MT 管理器签名 Release 包后，把那个包的 Base64 签名填到这里，再重新编译
+    // 签名校验（默认占位符会直接放行，千万不要改）
     private static final String OFFICIAL_SIGNATURE = "你的正式签名Base64字符串==";
 
     // UI 控件
@@ -63,7 +63,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 签名校验（正式发版时如果混淆后闪退，请先注释掉这段）
+        // 签名校验
         if (!checkSignature()) {
             Toast.makeText(this, "签名校验失败，请使用官方版本！", Toast.LENGTH_LONG).show();
             finish();
@@ -113,7 +113,7 @@ public class MainActivity extends AppCompatActivity {
         new Thread(() -> {
             executeSuCommand("mkdir -p " + TARGET_DIR);
 
-            // 提取内置资源（原样拷贝，不加解密）
+            // 提取内置资源（原样拷贝）
             extractAssetFile("busybox", TARGET_DIR + "/busybox");
             for (String script : DEFAULT_SCRIPTS) {
                 extractAssetFile(script, TARGET_DIR + "/" + script);
@@ -121,13 +121,13 @@ public class MainActivity extends AppCompatActivity {
 
             executeSuCommand("chmod 755 " + TARGET_DIR + "/*");
 
-            // 修复 DNS 解析，解决 nc: bad address
+            // 修复 DNS 解析
             String resolvPath = TARGET_DIR + "/resolv.conf";
             String dnsContent = "nameserver 114.114.114.114\\nnameserver 8.8.8.8\\n";
             executeSuCommand("echo -e \"" + dnsContent + "\" > " + resolvPath + " && chmod 644 " + resolvPath);
 
             mainHandler.post(() -> {
-                appendOutput("环境初始化完成。\n", "#00FF00");
+                appendOutput("\n环境初始化完成，可以开始运行脚本。\n", "#00FF00");
                 refreshScriptList();
             });
         }).start();
@@ -278,7 +278,7 @@ public class MainActivity extends AppCompatActivity {
     private void appendOutput(String text, String colorHex) {
         mainHandler.post(() -> {
             tvOutput.append(text);
-            scrollView.post(() -> scrollView.scrollTo(0, scrollView.getChildAt(0).getHeight())); // 自动滚到底部
+            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
         });
     }
 
