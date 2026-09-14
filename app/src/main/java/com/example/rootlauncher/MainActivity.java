@@ -39,27 +39,13 @@ import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
 
-    // ============================================================
-    // UI
-    // ============================================================
-
     private TextView tvOutput;
     private EditText etInput;
     private ScrollView scrollView;
     private ListView lvScripts;
 
-    // ============================================================
-    // Script
-    // ============================================================
-
-    private final ArrayList<String> scriptList =
-            new ArrayList<>();
-
+    private final ArrayList<String> scriptList = new ArrayList<>();
     private ScriptAdapter adapter;
-
-    // ============================================================
-    // 当前 ELF
-    // ============================================================
 
     private volatile Process process;
     private volatile BufferedWriter writer;
@@ -67,29 +53,13 @@ public class MainActivity extends AppCompatActivity {
 
     private volatile String pendingScriptPath = null;
 
-    // ============================================================
-    // Preferences
-    // ============================================================
-
     private android.content.SharedPreferences prefs;
 
-    // ============================================================
-    // BusyBox
-    // ============================================================
-
     private File busyboxFile;
-
-    // ============================================================
-    // Keyboard
-    // ============================================================
 
     private boolean keyboardVisible = false;
 
     private static final int SCRIPT_LIST_KEYBOARD_DP = 120;
-
-    // ============================================================
-    // 内置文件
-    // ============================================================
 
     private static final String BUILTIN_KAIROS =
             "Kairos_Driver_Loader_Release_90f76e9.sh";
@@ -100,19 +70,11 @@ public class MainActivity extends AppCompatActivity {
     private static final String BUSYBOX_ASSET =
             "busybox";
 
-    // ============================================================
-    // 统一运行目录
-    // ============================================================
-
     private static final String RUNTIME_DIR =
             "/data/local/tmp/com.example.rootlauncher/files";
 
     private static final String RUNTIME_BUSYBOX =
             RUNTIME_DIR + "/busybox";
-
-    // ============================================================
-    // 文件选择器
-    // ============================================================
 
     private final ActivityResultLauncher<Intent> filePickerLauncher =
             registerForActivityResult(
@@ -128,15 +90,13 @@ public class MainActivity extends AppCompatActivity {
                             return;
                         }
 
-                        Uri uri =
-                                result.getData().getData();
+                        Uri uri = result.getData().getData();
 
                         if (uri == null) {
                             return;
                         }
 
-                        String displayName =
-                                getFileName(uri);
+                        String displayName = getFileName(uri);
 
                         if (displayName == null
                                 || displayName.length() == 0) {
@@ -155,10 +115,6 @@ public class MainActivity extends AppCompatActivity {
                             File tempFile = null;
 
                             try {
-
-                                // ------------------------------------------------
-                                // 复制到 App 私有目录
-                                // ------------------------------------------------
 
                                 tempFile =
                                         new File(
@@ -183,17 +139,13 @@ public class MainActivity extends AppCompatActivity {
                                 }
 
                                 FileOutputStream fos =
-                                        new FileOutputStream(
-                                                tempFile
-                                        );
+                                        new FileOutputStream(tempFile);
 
-                                byte[] buffer =
-                                        new byte[8192];
+                                byte[] buffer = new byte[8192];
 
                                 int len;
 
-                                while ((len =
-                                        is.read(buffer)) > 0) {
+                                while ((len = is.read(buffer)) > 0) {
 
                                     fos.write(
                                             buffer,
@@ -204,10 +156,6 @@ public class MainActivity extends AppCompatActivity {
 
                                 is.close();
                                 fos.close();
-
-                                // ------------------------------------------------
-                                // 检查
-                                // ------------------------------------------------
 
                                 if (!tempFile.exists()
                                         || tempFile.length() == 0) {
@@ -228,10 +176,6 @@ public class MainActivity extends AppCompatActivity {
                                                 + " bytes\n"
                                 );
 
-                                // ------------------------------------------------
-                                // Root
-                                // ------------------------------------------------
-
                                 if (!checkRoot()) {
 
                                     appendText(
@@ -240,10 +184,6 @@ public class MainActivity extends AppCompatActivity {
 
                                     return;
                                 }
-
-                                // ------------------------------------------------
-                                // 创建运行目录
-                                // ------------------------------------------------
 
                                 if (!prepareRuntimeDir()) {
 
@@ -254,18 +194,10 @@ public class MainActivity extends AppCompatActivity {
                                     return;
                                 }
 
-                                // ------------------------------------------------
-                                // 目标
-                                // ------------------------------------------------
-
                                 String runtimePath =
                                         RUNTIME_DIR
                                                 + "/"
                                                 + finalDisplayName;
-
-                                // ------------------------------------------------
-                                // Root 复制
-                                // ------------------------------------------------
 
                                 if (!copyFileAsRoot(
                                         tempFile.getAbsolutePath(),
@@ -279,10 +211,6 @@ public class MainActivity extends AppCompatActivity {
                                     return;
                                 }
 
-                                // ------------------------------------------------
-                                // chmod
-                                // ------------------------------------------------
-
                                 if (!chmod755(runtimePath)) {
 
                                     appendText(
@@ -291,10 +219,6 @@ public class MainActivity extends AppCompatActivity {
 
                                     return;
                                 }
-
-                                // ------------------------------------------------
-                                // 检查 ELF Magic
-                                // ------------------------------------------------
 
                                 String magic =
                                         readFileMagicAsRoot(
@@ -325,19 +249,13 @@ public class MainActivity extends AppCompatActivity {
                                     }
                                 }
 
-                                // ------------------------------------------------
-                                // 加入列表
-                                // ------------------------------------------------
-
                                 synchronized (scriptList) {
 
                                     if (!scriptList.contains(
                                             runtimePath
                                     )) {
 
-                                        scriptList.add(
-                                                runtimePath
-                                        );
+                                        scriptList.add(runtimePath);
                                     }
                                 }
 
@@ -388,14 +306,8 @@ public class MainActivity extends AppCompatActivity {
                     }
             );
 
-    // ============================================================
-    // onCreate
-    // ============================================================
-
     @Override
-    protected void onCreate(
-            Bundle savedInstanceState
-    ) {
+    protected void onCreate(Bundle savedInstanceState) {
 
         super.onCreate(savedInstanceState);
 
@@ -403,49 +315,21 @@ public class MainActivity extends AppCompatActivity {
                 WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         );
 
-        setContentView(
-                R.layout.activity_main
-        );
+        setContentView(R.layout.activity_main);
 
-        tvOutput =
-                findViewById(
-                        R.id.tvOutput
-                );
+        tvOutput = findViewById(R.id.tvOutput);
+        etInput = findViewById(R.id.etInput);
+        scrollView = findViewById(R.id.scrollView);
+        lvScripts = findViewById(R.id.lvScripts);
 
-        etInput =
-                findViewById(
-                        R.id.etInput
-                );
-
-        scrollView =
-                findViewById(
-                        R.id.scrollView
-                );
-
-        lvScripts =
-                findViewById(
-                        R.id.lvScripts
-                );
-
-        Button btnAdd =
-                findViewById(
-                        R.id.btnAdd
-                );
-
-        Button btnSend =
-                findViewById(
-                        R.id.btnSend
-                );
+        Button btnAdd = findViewById(R.id.btnAdd);
+        Button btnSend = findViewById(R.id.btnSend);
 
         prefs =
                 getSharedPreferences(
                         "script_prefs",
                         MODE_PRIVATE
                 );
-
-        // ========================================================
-        // 恢复列表
-        // ========================================================
 
         Set<String> savedScripts =
                 prefs.getStringSet(
@@ -455,54 +339,27 @@ public class MainActivity extends AppCompatActivity {
 
         synchronized (scriptList) {
 
-            for (String savedPath :
-                    savedScripts) {
+            for (String savedPath : savedScripts) {
 
                 String normalized =
-                        normalizeSavedPath(
-                                savedPath
-                        );
+                        normalizeSavedPath(savedPath);
 
                 if (normalized != null
-                        && !scriptList.contains(
-                        normalized
-                )) {
+                        && !scriptList.contains(normalized)) {
 
-                    scriptList.add(
-                            normalized
-                    );
+                    scriptList.add(normalized);
                 }
             }
         }
 
-        // ========================================================
-        // 添加内置文件
-        // ========================================================
+        addBuiltinScript(BUILTIN_KAIROS);
+        addBuiltinScript(BUILTIN_TIME);
 
-        addBuiltinScript(
-                BUILTIN_KAIROS
-        );
+        adapter = new ScriptAdapter();
 
-        addBuiltinScript(
-                BUILTIN_TIME
-        );
-
-        // ========================================================
-        // Adapter
-        // ========================================================
-
-        adapter =
-                new ScriptAdapter();
-
-        lvScripts.setAdapter(
-                adapter
-        );
+        lvScripts.setAdapter(adapter);
 
         setupKeyboardListener();
-
-        // ========================================================
-        // 后台 Root 初始化
-        // ========================================================
 
         new Thread(() -> {
 
@@ -532,23 +389,10 @@ public class MainActivity extends AppCompatActivity {
                 );
             }
 
-            // ----------------------------------------------------
-            // 安装内置文件
-            // ----------------------------------------------------
-
-            installBuiltinAsset(
-                    BUILTIN_KAIROS
-            );
-
-            installBuiltinAsset(
-                    BUILTIN_TIME
-            );
+            installBuiltinAsset(BUILTIN_KAIROS);
+            installBuiltinAsset(BUILTIN_TIME);
 
         }).start();
-
-        // ========================================================
-        // 添加文件
-        // ========================================================
 
         btnAdd.setOnClickListener(v -> {
 
@@ -563,21 +407,13 @@ public class MainActivity extends AppCompatActivity {
                     Intent.CATEGORY_OPENABLE
             );
 
-            filePickerLauncher.launch(
-                    intent
-            );
+            filePickerLauncher.launch(intent);
         });
-
-        // ========================================================
-        // 输入 / 执行
-        // ========================================================
 
         btnSend.setOnClickListener(v -> {
 
             String input =
-                    etInput
-                            .getText()
-                            .toString();
+                    etInput.getText().toString();
 
             if (input.trim().isEmpty()) {
 
@@ -588,29 +424,19 @@ public class MainActivity extends AppCompatActivity {
                     && process != null
                     && writer != null) {
 
-                sendInputToElf(
-                        input
-                );
+                sendInputToElf(input);
 
             } else {
 
-                executeCommand(
-                        input
-                );
+                executeCommand(input);
             }
         });
     }
 
-    // ============================================================
-    // Keyboard
-    // ============================================================
-
     private void setupKeyboardListener() {
 
         final View rootView =
-                findViewById(
-                        android.R.id.content
-                );
+                findViewById(android.R.id.content);
 
         rootView.getViewTreeObserver()
                 .addOnGlobalLayoutListener(() -> {
@@ -620,17 +446,14 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     }
 
-                    Rect visibleRect =
-                            new Rect();
+                    Rect visibleRect = new Rect();
 
                     rootView.getWindowVisibleDisplayFrame(
                             visibleRect
                     );
 
                     int rootHeight =
-                            rootView
-                                    .getRootView()
-                                    .getHeight();
+                            rootView.getRootView().getHeight();
 
                     int visibleHeight =
                             visibleRect.bottom
@@ -644,24 +467,18 @@ public class MainActivity extends AppCompatActivity {
                             keyboardHeight
                                     > rootHeight * 0.15f;
 
-                    if (nowVisible
-                            == keyboardVisible) {
+                    if (nowVisible == keyboardVisible) {
 
                         return;
                     }
 
-                    keyboardVisible =
-                            nowVisible;
+                    keyboardVisible = nowVisible;
 
                     setScriptListKeyboardMode(
                             keyboardVisible
                     );
                 });
     }
-
-    // ============================================================
-    // 修改列表高度
-    // ============================================================
 
     private void setScriptListKeyboardMode(
             boolean keyboardMode
@@ -697,16 +514,13 @@ public class MainActivity extends AppCompatActivity {
 
         } else {
 
-            params.height =
-                    0;
+            params.height = 0;
 
             params.matchConstraintPercentHeight =
                     0.55f;
         }
 
-        lvScripts.setLayoutParams(
-                params
-        );
+        lvScripts.setLayoutParams(params);
 
         lvScripts.requestLayout();
 
@@ -721,13 +535,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // dp -> px
-    // ============================================================
-
-    private int dpToPx(
-            int dp
-    ) {
+    private int dpToPx(int dp) {
 
         return (int) (
                 dp
@@ -737,10 +545,6 @@ public class MainActivity extends AppCompatActivity {
                         + 0.5f
         );
     }
-
-    // ============================================================
-    // 添加内置文件
-    // ============================================================
 
     private void addBuiltinScript(
             String assetName
@@ -753,22 +557,14 @@ public class MainActivity extends AppCompatActivity {
 
         synchronized (scriptList) {
 
-            if (!scriptList.contains(
-                    runtimePath
-            )) {
+            if (!scriptList.contains(runtimePath)) {
 
-                scriptList.add(
-                        runtimePath
-                );
+                scriptList.add(runtimePath);
             }
         }
 
         saveScripts();
     }
-
-    // ============================================================
-    // 安装 APK 内置 ELF
-    // ============================================================
 
     private boolean installBuiltinAsset(
             String assetName
@@ -777,8 +573,7 @@ public class MainActivity extends AppCompatActivity {
         File tempFile =
                 new File(
                         getFilesDir(),
-                        "builtin_"
-                                + assetName
+                        "builtin_" + assetName
                 );
 
         try {
@@ -794,28 +589,17 @@ public class MainActivity extends AppCompatActivity {
                             + "\n"
             );
 
-            // ----------------------------------------------------
-            // APK assets
-            // ----------------------------------------------------
-
             InputStream is =
-                    getAssets()
-                            .open(
-                                    assetName
-                            );
+                    getAssets().open(assetName);
 
             FileOutputStream fos =
-                    new FileOutputStream(
-                            tempFile
-                    );
+                    new FileOutputStream(tempFile);
 
-            byte[] buffer =
-                    new byte[8192];
+            byte[] buffer = new byte[8192];
 
             int len;
 
-            while ((len =
-                    is.read(buffer)) > 0) {
+            while ((len = is.read(buffer)) > 0) {
 
                 fos.write(
                         buffer,
@@ -845,22 +629,15 @@ public class MainActivity extends AppCompatActivity {
                             + " bytes\n"
             );
 
-            // ----------------------------------------------------
-            // Root 复制
-            // ----------------------------------------------------
-
             String runtimePath =
                     RUNTIME_DIR
                             + "/"
                             + assetName;
 
-            boolean copied =
-                    copyFileAsRoot(
-                            tempFile.getAbsolutePath(),
-                            runtimePath
-                    );
-
-            if (!copied) {
+            if (!copyFileAsRoot(
+                    tempFile.getAbsolutePath(),
+                    runtimePath
+            )) {
 
                 appendText(
                         "[内置文件] Root 复制失败："
@@ -871,9 +648,7 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             }
 
-            if (!chmod755(
-                    runtimePath
-            )) {
+            if (!chmod755(runtimePath)) {
 
                 appendText(
                         "[内置文件] chmod 失败："
@@ -918,21 +693,14 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // ELF 输入
-    // ============================================================
-
     private void sendInputToElf(
             String input
     ) {
 
         try {
 
-            BufferedWriter currentWriter =
-                    writer;
-
-            Process currentProcess =
-                    process;
+            BufferedWriter currentWriter = writer;
+            Process currentProcess = process;
 
             if (currentWriter == null
                     || currentProcess == null
@@ -945,12 +713,8 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            currentWriter.write(
-                    input
-            );
-
+            currentWriter.write(input);
             currentWriter.newLine();
-
             currentWriter.flush();
 
             runOnUiThread(() ->
@@ -967,10 +731,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // 普通 Root 命令
-    // ============================================================
-
     private void executeCommand(
             String cmd
     ) {
@@ -981,8 +741,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        final String command =
-                cmd.trim();
+        final String command = cmd.trim();
 
         appendText(
                 "$ "
@@ -999,9 +758,7 @@ public class MainActivity extends AppCompatActivity {
             try {
 
                 String finalCmd =
-                        buildEnvironmentCommand(
-                                command
-                        );
+                        buildEnvironmentCommand(command);
 
                 appendText(
                         "[执行]\n"
@@ -1016,12 +773,9 @@ public class MainActivity extends AppCompatActivity {
                                 finalCmd
                         );
 
-                pb.redirectErrorStream(
-                        true
-                );
+                pb.redirectErrorStream(true);
 
-                Process p =
-                        pb.start();
+                Process p = pb.start();
 
                 BufferedReader reader =
                         new BufferedReader(
@@ -1031,14 +785,12 @@ public class MainActivity extends AppCompatActivity {
                                 )
                         );
 
-                char[] buffer =
-                        new char[1024];
+                char[] buffer = new char[1024];
 
                 int count;
 
                 while ((count =
-                        reader.read(buffer))
-                        != -1) {
+                        reader.read(buffer)) != -1) {
 
                     if (count <= 0) {
 
@@ -1053,20 +805,15 @@ public class MainActivity extends AppCompatActivity {
                             );
 
                     String clean =
-                            cleanElfOutput(
-                                    raw
-                            );
+                            cleanElfOutput(raw);
 
                     if (!clean.isEmpty()) {
 
-                        appendText(
-                                clean
-                        );
+                        appendText(clean);
                     }
                 }
 
-                int exitCode =
-                        p.waitFor();
+                int exitCode = p.waitFor();
 
                 appendText(
                         "\n[exit "
@@ -1086,10 +833,6 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // ============================================================
-    // 构建环境
-    // ============================================================
-
     private String buildEnvironmentCommand(
             String command
     ) {
@@ -1105,37 +848,25 @@ public class MainActivity extends AppCompatActivity {
                         )
                         + ":$PATH; "
                         + "export HOME="
-                        + shellQuote(
-                                RUNTIME_DIR
-                        )
+                        + shellQuote(RUNTIME_DIR)
                         + "; "
                         + "export TMPDIR="
-                        + shellQuote(
-                                RUNTIME_DIR
-                        )
+                        + shellQuote(RUNTIME_DIR)
                         + "; "
                         + command;
     }
-
-    // ============================================================
-    // 找 su
-    // ============================================================
 
     private String findSu() {
 
         String[] suPaths = {
 
                 "/system/bin/su",
-
                 "/system/xbin/su",
-
                 "/sbin/su",
-
                 "/debug_ramdisk/su"
         };
 
-        for (String path :
-                suPaths) {
+        for (String path : suPaths) {
 
             if (new File(path).exists()) {
 
@@ -1145,10 +876,6 @@ public class MainActivity extends AppCompatActivity {
 
         return "su";
     }
-
-    // ============================================================
-    // Root 检查
-    // ============================================================
 
     private boolean checkRoot() {
 
@@ -1173,19 +900,13 @@ public class MainActivity extends AppCompatActivity {
 
             return exitCode == 0
                     && output != null
-                    && output.contains(
-                            "uid=0"
-                    );
+                    && output.contains("uid=0");
 
         } catch (Exception e) {
 
             return false;
         }
     }
-
-    // ============================================================
-    // Root Dialog
-    // ============================================================
 
     private void showRootDialog() {
 
@@ -1200,9 +921,7 @@ public class MainActivity extends AppCompatActivity {
             new AlertDialog.Builder(
                     MainActivity.this
             )
-                    .setTitle(
-                            "需要 Root 权限"
-                    )
+                    .setTitle("需要 Root 权限")
                     .setMessage(
                             "本软件需要 Root 权限才能执行 ELF。\n\n"
                                     + "请在 KernelSU / Magisk 中允许本应用，"
@@ -1225,14 +944,11 @@ public class MainActivity extends AppCompatActivity {
                                         String path =
                                                 pendingScriptPath;
 
-                                        pendingScriptPath =
-                                                null;
+                                        pendingScriptPath = null;
 
                                         if (path != null) {
 
-                                            runElfReal(
-                                                    path
-                                            );
+                                            runElfReal(path);
                                         }
 
                                     } else {
@@ -1253,10 +969,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ============================================================
-    // Shell Quote
-    // ============================================================
-
     private String shellQuote(
             String value
     ) {
@@ -1274,10 +986,6 @@ public class MainActivity extends AppCompatActivity {
                 + "'";
     }
 
-    // ============================================================
-    // 运行 ELF
-    // ============================================================
-
     private void runElf(
             String scriptPath
     ) {
@@ -1286,8 +994,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (!checkRoot()) {
 
-                pendingScriptPath =
-                        scriptPath;
+                pendingScriptPath = scriptPath;
 
                 appendText(
                         "[ELF] 没有 Root，等待授权\n"
@@ -1298,37 +1005,22 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            runElfReal(
-                    scriptPath
-            );
+            runElfReal(scriptPath);
 
         }).start();
     }
-
-    // ============================================================
-    // 真正运行 ELF
-    // ============================================================
 
     private void runElfReal(
             String scriptPath
     ) {
 
-        // --------------------------------------------------------
-        // 先停止旧 ELF
-        // --------------------------------------------------------
-
         stopCurrentElf();
 
         try {
 
-            // ----------------------------------------------------
-            // Root
-            // ----------------------------------------------------
-
             if (!checkRoot()) {
 
-                pendingScriptPath =
-                        scriptPath;
+                pendingScriptPath = scriptPath;
 
                 appendText(
                         "[ELF] Root 权限丢失\n"
@@ -1339,10 +1031,6 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // ----------------------------------------------------
-            // Runtime
-            // ----------------------------------------------------
-
             if (!prepareRuntimeDir()) {
 
                 appendText(
@@ -1352,14 +1040,8 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // ----------------------------------------------------
-            // 路径规范化
-            // ----------------------------------------------------
-
             String runtimePath =
-                    normalizeSavedPath(
-                            scriptPath
-                    );
+                    normalizeSavedPath(scriptPath);
 
             if (runtimePath == null) {
 
@@ -1371,23 +1053,13 @@ public class MainActivity extends AppCompatActivity {
             }
 
             File elf =
-                    new File(
-                            runtimePath
-                    );
+                    new File(runtimePath);
 
             String fileName =
                     elf.getName();
 
-            // ----------------------------------------------------
-            // 内置文件
-            // ----------------------------------------------------
-
-            if (BUILTIN_KAIROS.equals(
-                    fileName
-            )
-                    || BUILTIN_TIME.equals(
-                    fileName
-            )) {
+            if (BUILTIN_KAIROS.equals(fileName)
+                    || BUILTIN_TIME.equals(fileName)) {
 
                 if (!elf.exists()
                         || elf.length() == 0) {
@@ -1398,9 +1070,7 @@ public class MainActivity extends AppCompatActivity {
                                     + "\n"
                     );
 
-                    if (!installBuiltinAsset(
-                            fileName
-                    )) {
+                    if (!installBuiltinAsset(fileName)) {
 
                         appendText(
                                 "[ELF] 内置文件安装失败\n"
@@ -1410,10 +1080,6 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
             }
-
-            // ----------------------------------------------------
-            // 检查 ELF
-            // ----------------------------------------------------
 
             if (!elf.exists()) {
 
@@ -1468,13 +1134,7 @@ public class MainActivity extends AppCompatActivity {
                             + " bytes\n"
             );
 
-            // ----------------------------------------------------
-            // chmod
-            // ----------------------------------------------------
-
-            if (!chmod755(
-                    runtimePath
-            )) {
+            if (!chmod755(runtimePath)) {
 
                 appendText(
                         "[ELF] chmod 755 失败\n"
@@ -1483,14 +1143,8 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // ----------------------------------------------------
-            // 文件信息
-            // ----------------------------------------------------
-
             String lsOutput =
-                    rootLs(
-                            runtimePath
-                    );
+                    rootLs(runtimePath);
 
             if (lsOutput != null) {
 
@@ -1501,14 +1155,8 @@ public class MainActivity extends AppCompatActivity {
                 );
             }
 
-            // ----------------------------------------------------
-            // ELF Magic
-            // ----------------------------------------------------
-
             String magic =
-                    readFileMagicAsRoot(
-                            runtimePath
-                    );
+                    readFileMagicAsRoot(runtimePath);
 
             if (magic != null) {
 
@@ -1528,35 +1176,24 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            // ----------------------------------------------------
-            // BusyBox
-            //
-            // 不再用：
-            //
-            // busybox script -q -c 'exec ELF'
-            //
-            // ELF 直接启动。
-            //
-            // ----------------------------------------------------
-
+            /*
+             * 保留 BusyBox 初始化功能。
+             *
+             * 但执行 ELF 时不再使用：
+             *
+             * busybox script -q -c ...
+             *
+             * 而是直接 exec ELF。
+             */
             extractAndPrepareBusybox();
-
-            // ----------------------------------------------------
-            // 工作目录
-            // ----------------------------------------------------
 
             String elfDir =
                     elf.getParent();
 
             if (elfDir == null) {
 
-                elfDir =
-                        RUNTIME_DIR;
+                elfDir = RUNTIME_DIR;
             }
-
-            // ----------------------------------------------------
-            // 环境
-            // ----------------------------------------------------
 
             String env =
                     "export PATH="
@@ -1569,14 +1206,10 @@ public class MainActivity extends AppCompatActivity {
                             )
                             + ":$PATH; "
                             + "export HOME="
-                            + shellQuote(
-                                    RUNTIME_DIR
-                            )
+                            + shellQuote(RUNTIME_DIR)
                             + "; "
                             + "export TMPDIR="
-                            + shellQuote(
-                                    RUNTIME_DIR
-                            )
+                            + shellQuote(RUNTIME_DIR)
                             + "; "
                             + "export LD_LIBRARY_PATH="
                             + shellQuote(
@@ -1584,20 +1217,8 @@ public class MainActivity extends AppCompatActivity {
                             )
                             + ":$LD_LIBRARY_PATH; "
                             + "cd "
-                            + shellQuote(
-                                    elfDir
-                            )
-                            + "; ";
-
-            // ----------------------------------------------------
-            // ELF 本体
-            //
-            // 关键：
-            //
-            // exec '/path/to/ELF'
-            //
-            // 不经过 busybox script。
-            // ----------------------------------------------------
+                            + shellQuote(elfDir)
+                            + " || exit 126; ";
 
             String elfCommand =
                     "exec "
@@ -1610,9 +1231,7 @@ public class MainActivity extends AppCompatActivity {
                             + elfCommand;
 
             appendText(
-                    "[ELF] linker："
-                            + "/system/bin/linker64"
-                            + "\n"
+                    "[ELF] linker：/system/bin/linker64\n"
             );
 
             appendText(
@@ -1625,10 +1244,6 @@ public class MainActivity extends AppCompatActivity {
                             + "\n"
             );
 
-            // ----------------------------------------------------
-            // Process
-            // ----------------------------------------------------
-
             ProcessBuilder pb =
                     new ProcessBuilder(
                             findSu(),
@@ -1636,68 +1251,49 @@ public class MainActivity extends AppCompatActivity {
                             command
                     );
 
-            /*
-             * 不使用 redirectErrorStream(true)
-             *
-             * 因为我们分别读取 stdout/stderr，
-             * 这样可以更准确看到 linker 错误。
-             */
-            pb.redirectErrorStream(
-                    false
-            );
+            pb.redirectErrorStream(false);
 
             try {
 
                 pb.directory(
-                        new File(
-                                elfDir
-                        )
+                        new File(elfDir)
                 );
 
             } catch (Exception ignored) {
             }
 
-            process =
-                    pb.start();
+            process = pb.start();
 
             final Process currentProcess =
                     process;
 
-            // ----------------------------------------------------
-            // stdin
-            // ----------------------------------------------------
-
             writer =
                     new BufferedWriter(
                             new OutputStreamWriter(
-                                    currentProcess
-                                            .getOutputStream(),
+                                    currentProcess.getOutputStream(),
                                     StandardCharsets.UTF_8
                             )
                     );
 
-            elfRunning =
-                    true;
+            elfRunning = true;
 
             appendText(
                     "[+] ELF Process 已启动\n"
             );
 
+            /*
+             * 不再调用 Process.pid()
+             *
+             * Android 的 Process API / 当前项目编译环境
+             * 不保证提供 pid()。
+             */
             appendText(
-                    "[+] PID："
-                            + getProcessPid(
-                                    currentProcess
-                            )
-                            + "\n"
+                    "[+] PID：不可用（不影响执行）\n"
             );
 
             appendText(
                     "================================\n\n"
             );
-
-            // ====================================================
-            // stdout
-            // ====================================================
 
             Thread stdoutThread =
                     new Thread(() -> {
@@ -1706,8 +1302,7 @@ public class MainActivity extends AppCompatActivity {
 
                             InputStreamReader reader =
                                     new InputStreamReader(
-                                            currentProcess
-                                                    .getInputStream(),
+                                            currentProcess.getInputStream(),
                                             StandardCharsets.UTF_8
                                     );
 
@@ -1733,15 +1328,11 @@ public class MainActivity extends AppCompatActivity {
                                         );
 
                                 String clean =
-                                        cleanElfOutput(
-                                                raw
-                                        );
+                                        cleanElfOutput(raw);
 
                                 if (!clean.isEmpty()) {
 
-                                    appendText(
-                                            clean
-                                    );
+                                    appendText(clean);
                                 }
                             }
 
@@ -1759,13 +1350,7 @@ public class MainActivity extends AppCompatActivity {
 
                     });
 
-            stdoutThread.setName(
-                    "ELF-stdout"
-            );
-
-            // ====================================================
-            // stderr
-            // ====================================================
+            stdoutThread.setName("ELF-stdout");
 
             Thread stderrThread =
                     new Thread(() -> {
@@ -1774,8 +1359,7 @@ public class MainActivity extends AppCompatActivity {
 
                             InputStreamReader reader =
                                     new InputStreamReader(
-                                            currentProcess
-                                                    .getErrorStream(),
+                                            currentProcess.getErrorStream(),
                                             StandardCharsets.UTF_8
                                     );
 
@@ -1801,15 +1385,11 @@ public class MainActivity extends AppCompatActivity {
                                         );
 
                                 String clean =
-                                        cleanElfOutput(
-                                                raw
-                                        );
+                                        cleanElfOutput(raw);
 
                                 if (!clean.isEmpty()) {
 
-                                    appendText(
-                                            clean
-                                    );
+                                    appendText(clean);
                                 }
                             }
 
@@ -1827,17 +1407,10 @@ public class MainActivity extends AppCompatActivity {
 
                     });
 
-            stderrThread.setName(
-                    "ELF-stderr"
-            );
+            stderrThread.setName("ELF-stderr");
 
             stdoutThread.start();
-
             stderrThread.start();
-
-            // ====================================================
-            // 等待
-            // ====================================================
 
             new Thread(() -> {
 
@@ -1848,28 +1421,21 @@ public class MainActivity extends AppCompatActivity {
 
                     try {
 
-                        stdoutThread.join(
-                                1500
-                        );
+                        stdoutThread.join(1500);
 
                     } catch (Exception ignored) {
                     }
 
                     try {
 
-                        stderrThread.join(
-                                1500
-                        );
+                        stderrThread.join(1500);
 
                     } catch (Exception ignored) {
                     }
 
-                    final int code =
-                            exitCode;
-
                     appendText(
                             "\n[ELF exit "
-                                    + code
+                                    + exitCode
                                     + "]\n"
                     );
 
@@ -1883,15 +1449,11 @@ public class MainActivity extends AppCompatActivity {
 
                 } finally {
 
-                    if (process ==
-                            currentProcess) {
+                    if (process == currentProcess) {
 
                         writer = null;
-
                         process = null;
-
-                        elfRunning =
-                                false;
+                        elfRunning = false;
                     }
                 }
 
@@ -1900,11 +1462,8 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
 
             writer = null;
-
             process = null;
-
-            elfRunning =
-                    false;
+            elfRunning = false;
 
             appendText(
                     "\n[ELF 启动失败]\n"
@@ -1914,42 +1473,36 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // 获取 Process PID
-    // ============================================================
-
+    /*
+     * ============================================================
+     * PID
+     * ============================================================
+     *
+     * 这里故意不调用 Process.pid()。
+     *
+     * 原来的：
+     *
+     *     return p.pid();
+     *
+     * 会导致你的 assembleRelease 编译失败。
+     *
+     * 返回 -1 表示当前环境不提供 PID。
+     * 这不会影响 Process 的启动、输入、输出和终止。
+     */
     private long getProcessPid(
             Process p
     ) {
 
-        if (p == null) {
-
-            return -1;
-        }
-
-        try {
-
-            return p.pid();
-
-        } catch (Throwable ignored) {
-
-            return -1;
-        }
+        return -1L;
     }
-
-    // ============================================================
-    // 停止 ELF
-    // ============================================================
 
     private void stopCurrentElf() {
 
-        elfRunning =
-                false;
+        elfRunning = false;
 
         try {
 
-            BufferedWriter currentWriter =
-                    writer;
+            BufferedWriter currentWriter = writer;
 
             if (currentWriter != null) {
 
@@ -1961,35 +1514,62 @@ public class MainActivity extends AppCompatActivity {
 
         writer = null;
 
-        try {
+        Process currentProcess = process;
 
-            Process currentProcess =
-                    process;
+        if (currentProcess != null) {
 
-            if (currentProcess != null) {
+            try {
 
-                currentProcess.destroy();
-
+                /*
+                 * 不使用 Process.isAlive()。
+                 *
+                 * 通过 exitValue() 判断进程是否已经结束。
+                 */
                 try {
 
-                    if (currentProcess.isAlive()) {
+                    currentProcess.exitValue();
 
-                        currentProcess.destroyForcibly();
+                } catch (IllegalThreadStateException stillRunning) {
+
+                    currentProcess.destroy();
+
+                    /*
+                     * 给 destroy 一点时间。
+                     */
+                    try {
+
+                        Thread.sleep(100);
+
+                    } catch (InterruptedException interrupted) {
+
+                        Thread.currentThread().interrupt();
                     }
 
-                } catch (Exception ignored) {
-                }
-            }
+                    try {
 
-        } catch (Exception ignored) {
+                        currentProcess.exitValue();
+
+                    } catch (IllegalThreadStateException ignored) {
+
+                        /*
+                         * 如果仍然没有结束，
+                         * 使用 destroyForcibly()。
+                         */
+                        try {
+
+                            currentProcess.destroyForcibly();
+
+                        } catch (Throwable ignored2) {
+                        }
+                    }
+                }
+
+            } catch (Throwable ignored) {
+            }
         }
 
         process = null;
     }
-
-    // ============================================================
-    // 创建运行目录
-    // ============================================================
 
     private boolean prepareRuntimeDir() {
 
@@ -1997,13 +1577,9 @@ public class MainActivity extends AppCompatActivity {
 
             String command =
                     "mkdir -p "
-                            + shellQuote(
-                                    RUNTIME_DIR
-                            )
+                            + shellQuote(RUNTIME_DIR)
                             + " && chmod 755 "
-                            + shellQuote(
-                                    RUNTIME_DIR
-                            );
+                            + shellQuote(RUNTIME_DIR);
 
             Process p =
                     new ProcessBuilder(
@@ -2015,9 +1591,7 @@ public class MainActivity extends AppCompatActivity {
                             .start();
 
             String output =
-                    readAll(
-                            p.getInputStream()
-                    );
+                    readAll(p.getInputStream());
 
             int exitCode =
                     p.waitFor();
@@ -2047,10 +1621,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // Root 复制文件
-    // ============================================================
-
     private boolean copyFileAsRoot(
             String source,
             String destination
@@ -2060,23 +1630,15 @@ public class MainActivity extends AppCompatActivity {
 
             String command =
                     "mkdir -p "
-                            + shellQuote(
-                                    RUNTIME_DIR
-                            )
+                            + shellQuote(RUNTIME_DIR)
                             + "; "
                             + "cat "
-                            + shellQuote(
-                                    source
-                            )
+                            + shellQuote(source)
                             + " > "
-                            + shellQuote(
-                                    destination
-                            )
+                            + shellQuote(destination)
                             + "; "
                             + "chmod 755 "
-                            + shellQuote(
-                                    destination
-                            );
+                            + shellQuote(destination);
 
             Process p =
                     new ProcessBuilder(
@@ -2088,9 +1650,7 @@ public class MainActivity extends AppCompatActivity {
                             .start();
 
             String output =
-                    readAll(
-                            p.getInputStream()
-                    );
+                    readAll(p.getInputStream());
 
             int exitCode =
                     p.waitFor();
@@ -2106,11 +1666,8 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             }
 
-            // 再检查目标
             File destinationFile =
-                    new File(
-                            destination
-                    );
+                    new File(destination);
 
             if (!destinationFile.exists()) {
 
@@ -2137,10 +1694,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // chmod 755
-    // ============================================================
-
     private boolean chmod755(
             String path
     ) {
@@ -2152,17 +1705,13 @@ public class MainActivity extends AppCompatActivity {
                             findSu(),
                             "-c",
                             "chmod 755 "
-                                    + shellQuote(
-                                            path
-                                    )
+                                    + shellQuote(path)
                     )
                             .redirectErrorStream(true)
                             .start();
 
             String output =
-                    readAll(
-                            p.getInputStream()
-                    );
+                    readAll(p.getInputStream());
 
             int exitCode =
                     p.waitFor();
@@ -2194,10 +1743,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // Root ls
-    // ============================================================
-
     private String rootLs(
             String path
     ) {
@@ -2209,17 +1754,13 @@ public class MainActivity extends AppCompatActivity {
                             findSu(),
                             "-c",
                             "ls -l "
-                                    + shellQuote(
-                                            path
-                                    )
+                                    + shellQuote(path)
                     )
                             .redirectErrorStream(true)
                             .start();
 
             String output =
-                    readAll(
-                            p.getInputStream()
-                    );
+                    readAll(p.getInputStream());
 
             p.waitFor();
 
@@ -2231,10 +1772,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // 读取 ELF 文件头
-    // ============================================================
-
     private String readFileMagicAsRoot(
             String path
     ) {
@@ -2243,9 +1780,7 @@ public class MainActivity extends AppCompatActivity {
 
             String command =
                     "od -An -tx1 -N 4 "
-                            + shellQuote(
-                                    path
-                            );
+                            + shellQuote(path);
 
             Process p =
                     new ProcessBuilder(
@@ -2257,9 +1792,7 @@ public class MainActivity extends AppCompatActivity {
                             .start();
 
             String output =
-                    readAll(
-                            p.getInputStream()
-                    );
+                    readAll(p.getInputStream());
 
             p.waitFor();
 
@@ -2281,10 +1814,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // APK BusyBox
-    // ============================================================
-
     private boolean extractAndPrepareBusybox() {
 
         File tempFile =
@@ -2296,23 +1825,16 @@ public class MainActivity extends AppCompatActivity {
         try {
 
             InputStream is =
-                    getAssets()
-                            .open(
-                                    BUSYBOX_ASSET
-                            );
+                    getAssets().open(BUSYBOX_ASSET);
 
             FileOutputStream fos =
-                    new FileOutputStream(
-                            tempFile
-                    );
+                    new FileOutputStream(tempFile);
 
-            byte[] buffer =
-                    new byte[8192];
+            byte[] buffer = new byte[8192];
 
             int len;
 
-            while ((len =
-                    is.read(buffer)) > 0) {
+            while ((len = is.read(buffer)) > 0) {
 
                 fos.write(
                         buffer,
@@ -2348,13 +1870,9 @@ public class MainActivity extends AppCompatActivity {
                                     tempFile.getAbsolutePath()
                             )
                             + " > "
-                            + shellQuote(
-                                    destination
-                            )
+                            + shellQuote(destination)
                             + "; chmod 755 "
-                            + shellQuote(
-                                    destination
-                            );
+                            + shellQuote(destination);
 
             Process p =
                     new ProcessBuilder(
@@ -2366,12 +1884,9 @@ public class MainActivity extends AppCompatActivity {
                             .start();
 
             String output =
-                    readAll(
-                            p.getInputStream()
-                    );
+                    readAll(p.getInputStream());
 
-            int exit =
-                    p.waitFor();
+            int exit = p.waitFor();
 
             if (exit != 0) {
 
@@ -2384,9 +1899,7 @@ public class MainActivity extends AppCompatActivity {
             }
 
             busyboxFile =
-                    new File(
-                            RUNTIME_BUSYBOX
-                    );
+                    new File(RUNTIME_BUSYBOX);
 
             if (!busyboxFile.exists()
                     || busyboxFile.length() == 0) {
@@ -2424,10 +1937,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // BusyBox applet
-    // ============================================================
-
     private boolean hasBusyboxApplet(
             String appletList,
             String wanted
@@ -2440,16 +1949,11 @@ public class MainActivity extends AppCompatActivity {
         }
 
         String[] applets =
-                appletList.split(
-                        "\\s+"
-                );
+                appletList.split("\\s+");
 
-        for (String applet :
-                applets) {
+        for (String applet : applets) {
 
-            if (wanted.equals(
-                    applet.trim()
-            )) {
+            if (wanted.equals(applet.trim())) {
 
                 return true;
             }
@@ -2457,10 +1961,6 @@ public class MainActivity extends AppCompatActivity {
 
         return false;
     }
-
-    // ============================================================
-    // readAll
-    // ============================================================
 
     private String readAll(
             InputStream inputStream
@@ -2482,14 +1982,12 @@ public class MainActivity extends AppCompatActivity {
                             StandardCharsets.UTF_8
                     );
 
-            char[] buffer =
-                    new char[1024];
+            char[] buffer = new char[1024];
 
             int count;
 
             while ((count =
-                    reader.read(buffer))
-                    != -1) {
+                    reader.read(buffer)) != -1) {
 
                 if (count > 0) {
 
@@ -2506,10 +2004,6 @@ public class MainActivity extends AppCompatActivity {
 
         return result.toString();
     }
-
-    // ============================================================
-    // 清理输出
-    // ============================================================
 
     private String cleanElfOutput(
             String text
@@ -2542,20 +2036,13 @@ public class MainActivity extends AppCompatActivity {
         return text;
     }
 
-    // ============================================================
-    // 获取文件名
-    // ============================================================
-
     private String getFileName(
             Uri uri
     ) {
 
-        String result =
-                null;
+        String result = null;
 
-        if ("content".equals(
-                uri.getScheme()
-        )) {
+        if ("content".equals(uri.getScheme())) {
 
             try (
                     Cursor cursor =
@@ -2574,16 +2061,13 @@ public class MainActivity extends AppCompatActivity {
 
                     int nameIndex =
                             cursor.getColumnIndex(
-                                    OpenableColumns
-                                            .DISPLAY_NAME
+                                    OpenableColumns.DISPLAY_NAME
                             );
 
                     if (nameIndex != -1) {
 
                         result =
-                                cursor.getString(
-                                        nameIndex
-                                );
+                                cursor.getString(nameIndex);
                     }
                 }
 
@@ -2593,8 +2077,7 @@ public class MainActivity extends AppCompatActivity {
 
         if (result == null) {
 
-            result =
-                    uri.getPath();
+            result = uri.getPath();
 
             if (result != null) {
 
@@ -2614,10 +2097,6 @@ public class MainActivity extends AppCompatActivity {
         return result;
     }
 
-    // ============================================================
-    // 文件名清理
-    // ============================================================
-
     private String sanitizeFileName(
             String name
     ) {
@@ -2631,22 +2110,13 @@ public class MainActivity extends AppCompatActivity {
         }
 
         name =
-                name.replace(
-                        "/",
-                        "_"
-                );
+                name.replace("/", "_");
 
         name =
-                name.replace(
-                        "\\",
-                        "_"
-                );
+                name.replace("\\", "_");
 
         name =
-                name.replace(
-                        "\u0000",
-                        "_"
-                );
+                name.replace("\u0000", "_");
 
         if (".".equals(name)
                 || "..".equals(name)) {
@@ -2659,10 +2129,6 @@ public class MainActivity extends AppCompatActivity {
 
         return name;
     }
-
-    // ============================================================
-    // 路径迁移
-    // ============================================================
 
     private String normalizeSavedPath(
             String savedPath
@@ -2677,10 +2143,6 @@ public class MainActivity extends AppCompatActivity {
         savedPath =
                 savedPath.trim();
 
-        // --------------------------------------------------------
-        // 新路径
-        // --------------------------------------------------------
-
         if (savedPath.startsWith(
                 RUNTIME_DIR + "/"
         )) {
@@ -2688,14 +2150,8 @@ public class MainActivity extends AppCompatActivity {
             return savedPath;
         }
 
-        // --------------------------------------------------------
-        // 旧路径
-        // --------------------------------------------------------
-
         String fileName =
-                new File(
-                        savedPath
-                ).getName();
+                new File(savedPath).getName();
 
         if (fileName == null
                 || fileName.isEmpty()) {
@@ -2707,10 +2163,6 @@ public class MainActivity extends AppCompatActivity {
                 + "/"
                 + fileName;
     }
-
-    // ============================================================
-    // 保存
-    // ============================================================
 
     private void saveScripts() {
 
@@ -2724,17 +2176,11 @@ public class MainActivity extends AppCompatActivity {
             prefs.edit()
                     .putStringSet(
                             "scripts",
-                            new HashSet<>(
-                                    scriptList
-                            )
+                            new HashSet<>(scriptList)
                     )
                     .apply();
         }
     }
-
-    // ============================================================
-    // Script Adapter
-    // ============================================================
 
     private class ScriptAdapter
             extends ArrayAdapter<String> {
@@ -2760,9 +2206,7 @@ public class MainActivity extends AppCompatActivity {
 
                 convertView =
                         LayoutInflater
-                                .from(
-                                        getContext()
-                                )
+                                .from(getContext())
                                 .inflate(
                                         R.layout.item_script,
                                         parent,
@@ -2781,14 +2225,11 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 path =
-                        scriptList.get(
-                                position
-                        );
+                        scriptList.get(position);
             }
 
             String fileName =
-                    new File(path)
-                            .getName();
+                    new File(path).getName();
 
             TextView tvName =
                     convertView.findViewById(
@@ -2807,9 +2248,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (tvName != null) {
 
-                tvName.setText(
-                        fileName
-                );
+                tvName.setText(fileName);
             }
 
             if (btnRun != null) {
@@ -2824,25 +2263,17 @@ public class MainActivity extends AppCompatActivity {
                 btnDelete.setOnClickListener(
                         v -> {
 
-                            String deletePath =
-                                    null;
+                            String deletePath = null;
 
                             synchronized (scriptList) {
 
                                 if (position >= 0
-                                        && position
-                                        < scriptList.size()) {
+                                        && position < scriptList.size()) {
 
                                     deletePath =
-                                            scriptList.remove(
-                                                    position
-                                            );
+                                            scriptList.remove(position);
                                 }
                             }
-
-                            // ------------------------------------
-                            // 删除运行目录中的实际文件
-                            // ------------------------------------
 
                             if (deletePath != null) {
 
@@ -2862,13 +2293,9 @@ public class MainActivity extends AppCompatActivity {
                                                             findSu(),
                                                             "-c",
                                                             "rm -f "
-                                                                    + shellQuote(
-                                                                    target
-                                                            )
+                                                                    + shellQuote(target)
                                                     )
-                                                            .redirectErrorStream(
-                                                                    true
-                                                            )
+                                                            .redirectErrorStream(true)
                                                             .start();
 
                                             p.waitFor();
@@ -2891,10 +2318,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // 输出
-    // ============================================================
-
     private void appendText(
             String text
     ) {
@@ -2912,9 +2335,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            tvOutput.append(
-                    text
-            );
+            tvOutput.append(text);
 
             if (scrollView != null) {
 
@@ -2926,10 +2347,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
-
-    // ============================================================
-    // Exception message
-    // ============================================================
 
     private String safeMessage(
             Exception e
@@ -2951,10 +2368,6 @@ public class MainActivity extends AppCompatActivity {
 
         return msg;
     }
-
-    // ============================================================
-    // Activity destroy
-    // ============================================================
 
     @Override
     protected void onDestroy() {
