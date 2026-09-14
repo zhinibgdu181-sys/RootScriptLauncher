@@ -27,6 +27,7 @@ import androidx.constraintlayout.widget.ConstraintLayout;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -260,19 +261,16 @@ public class MainActivity extends AppCompatActivity {
                                             "[+] 检测到 Shell 脚本\n"
                                     );
 
-                                    if (localInfo.shebang != null) {
-
-                                        appendText(
-                                                "[Script] Interpreter："
-                                                        + localInfo.shebang
-                                                        + "\n"
-                                        );
-                                    }
+                                    appendText(
+                                            "[Script] Shebang："
+                                                    + localInfo.shebang
+                                                    + "\n"
+                                    );
 
                                 } else {
 
                                     appendText(
-                                            "[!] 这不是标准 ELF 文件\n"
+                                            "[!] 这不是标准 ELF 文件，也没有检测到 shebang\n"
                                     );
                                 }
 
@@ -348,6 +346,14 @@ public class MainActivity extends AppCompatActivity {
                                                         + "\n"
                                         );
                                     }
+
+                                } else if (rootInfo.isShebang) {
+
+                                    appendText(
+                                            "[Script] Root 文件检测到 Shebang："
+                                                    + rootInfo.shebang
+                                                    + "\n"
+                                    );
                                 }
 
                                 synchronized (scriptList) {
@@ -512,6 +518,10 @@ public class MainActivity extends AppCompatActivity {
         new Thread(() -> {
 
             if (!checkRoot()) {
+
+                appendText(
+                        "[!] Root 权限检查失败\n"
+                );
 
                 showRootDialog();
 
@@ -865,6 +875,12 @@ public class MainActivity extends AppCompatActivity {
                         "[内置文件] 检测到 Shell 脚本\n"
                 );
 
+                appendText(
+                        "[内置文件] Shebang："
+                                + info.shebang
+                                + "\n"
+                );
+
             } else {
 
                 appendText(
@@ -1021,13 +1037,22 @@ public class MainActivity extends AppCompatActivity {
 
             try {
 
+                if (!checkRoot()) {
+
+                    appendText(
+                            "[执行失败] 当前没有 Root 权限\n"
+                    );
+
+                    return;
+                }
+
                 String finalCmd =
                         buildEnvironmentCommand(
                                 command
                         );
 
                 appendText(
-                        "[执行]\n"
+                        "[root shell]\n"
                                 + finalCmd
                                 + "\n"
                 );
@@ -1040,67 +1065,63 @@ public class MainActivity extends AppCompatActivity {
                         );
 
                 pb.redirectErrorStream(
-                        true
+                        false
                 );
 
                 Process p =
                         pb.start();
 
-                BufferedReader reader =
-                        new BufferedReader(
-                                new InputStreamReader(
-                                        p.getInputStream(),
-                                        StandardCharsets.UTF_8
-                                )
-                        );
+                Thread stdoutThread =
+                        new Thread(() -> {
 
-                char[] buffer =
-                        new char[1024];
-
-                int count;
-
-                while ((count =
-                        reader.read(buffer))
-                        != -1) {
-
-                    if (count <= 0) {
-
-                        continue;
-                    }
-
-                    String raw =
-                            new String(
-                                    buffer,
-                                    0,
-                                    count
+                            readProcessStream(
+                                    p.getInputStream(),
+                                    "stdout"
                             );
+                        });
 
-                    String clean =
-                            cleanElfOutput(
-                                    raw
+                Thread stderrThread =
+                        new Thread(() -> {
+
+                            readProcessStream(
+                                    p.getErrorStream(),
+                                    "stderr"
                             );
+                        });
 
-                    if (!clean.isEmpty()) {
-
-                        appendText(
-                                clean
-                        );
-                    }
-                }
+                stdoutThread.start();
+                stderrThread.start();
 
                 int exitCode =
                         p.waitFor();
 
+                try {
+                    stdoutThread.join(2000);
+                } catch (Exception ignored) {
+                }
+
+                try {
+                    stderrThread.join(2000);
+                } catch (Exception ignored) {
+                }
+
                 appendText(
-                        "\n[exit "
+                        "\n[exit code = "
                                 + exitCode
                                 + "]\n"
                 );
 
+                if (exitCode != 0) {
+
+                    appendText(
+                            "[!] Root shell 命令执行失败\n"
+                    );
+                }
+
             } catch (Exception e) {
 
                 appendText(
-                        "\n[执行失败] "
+                        "\n[执行失败]\n"
                                 + safeMessage(e)
                                 + "\n"
                 );
@@ -1110,7 +1131,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // Environment for shell commands
+    // Environment
     // ============================================================
 
     private String buildEnvironmentCommand(
@@ -1120,22 +1141,22 @@ public class MainActivity extends AppCompatActivity {
         return
                 "export PATH="
                         + shellQuote(
-                                RUNTIME_DIR
-                                        + ":/data/local/tmp"
-                                        + ":/system/bin"
-                                        + ":/system/xbin"
-                                        + ":/vendor/bin"
-                        )
+                        RUNTIME_DIR
+                                + ":/data/local/tmp"
+                                + ":/system/bin"
+                                + ":/system/xbin"
+                                + ":/vendor/bin"
+                )
                         + ":$PATH; "
                         + "export HOME="
                         + shellQuote(
-                                RUNTIME_DIR
-                        )
+                        RUNTIME_DIR
+                )
                         + "; "
                         + "export TMPDIR="
                         + shellQuote(
-                                RUNTIME_DIR
-                        )
+                        RUNTIME_DIR
+                )
                         + "; "
                         + command;
     }
@@ -1194,13 +1215,39 @@ public class MainActivity extends AppCompatActivity {
             int exitCode =
                     p.waitFor();
 
-            return exitCode == 0
-                    && output != null
-                    && output.contains(
-                            "uid=0"
+            if (exitCode != 0) {
+
+                appendText(
+                        "[Root] su exit code = "
+                                + exitCode
+                                + "\n"
+                );
+
+                if (output != null
+                        && !output.trim().isEmpty()) {
+
+                    appendText(
+                            "[Root] "
+                                    + output
+                                    + "\n"
                     );
+                }
+
+                return false;
+            }
+
+            return output != null
+                    && output.contains(
+                    "uid=0"
+            );
 
         } catch (Exception e) {
+
+            appendText(
+                    "[Root 检查异常] "
+                            + safeMessage(e)
+                            + "\n"
+            );
 
             return false;
         }
@@ -1227,7 +1274,7 @@ public class MainActivity extends AppCompatActivity {
                             "需要 Root 权限"
                     )
                     .setMessage(
-                            "本软件需要 Root 权限才能执行 ELF。\n\n"
+                            "本软件需要 Root 权限才能执行 ELF / Shell 脚本。\n\n"
                                     + "请在 KernelSU / Magisk 中允许本应用，"
                                     + "然后点击「重试」。"
                     )
@@ -1291,9 +1338,9 @@ public class MainActivity extends AppCompatActivity {
 
         return "'"
                 + value.replace(
-                        "'",
-                        "'\\''"
-                )
+                "'",
+                "'\\''"
+        )
                 + "'";
     }
 
@@ -1313,7 +1360,7 @@ public class MainActivity extends AppCompatActivity {
                         scriptPath;
 
                 appendText(
-                        "[ELF] 没有 Root，等待授权\n"
+                        "[EXEC] 没有 Root，等待授权\n"
                 );
 
                 showRootDialog();
@@ -1329,7 +1376,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // REAL ELF RUNNER
+    // REAL EXECUTION
     // ============================================================
 
     private void runElfReal(
@@ -1340,13 +1387,21 @@ public class MainActivity extends AppCompatActivity {
 
         try {
 
+            appendText(
+                    "\n================================\n"
+            );
+
+            appendText(
+                    "[EXEC] 开始执行\n"
+            );
+
             if (!checkRoot()) {
 
                 pendingScriptPath =
                         scriptPath;
 
                 appendText(
-                        "[ELF] Root 权限丢失\n"
+                        "[EXEC] Root 权限丢失\n"
                 );
 
                 showRootDialog();
@@ -1354,10 +1409,16 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
+            appendText(
+                    "[EXEC] Root shell："
+                            + findSu()
+                            + "\n"
+            );
+
             if (!prepareRuntimeDir()) {
 
                 appendText(
-                        "[ELF] 无法创建运行目录\n"
+                        "[EXEC] 无法创建运行目录\n"
                 );
 
                 return;
@@ -1371,7 +1432,7 @@ public class MainActivity extends AppCompatActivity {
             if (runtimePath == null) {
 
                 appendText(
-                        "[ELF] 无效路径\n"
+                        "[EXEC] 无效路径\n"
                 );
 
                 return;
@@ -1385,6 +1446,12 @@ public class MainActivity extends AppCompatActivity {
             String fileName =
                     target.getName();
 
+            appendText(
+                    "[EXEC] Path："
+                            + runtimePath
+                            + "\n"
+            );
+
             if (BUILTIN_KAIROS.equals(
                     fileName
             )
@@ -1396,7 +1463,7 @@ public class MainActivity extends AppCompatActivity {
                         || target.length() == 0) {
 
                     appendText(
-                            "[ELF] 内置文件不存在，重新安装："
+                            "[EXEC] 内置文件不存在，重新安装："
                                     + fileName
                                     + "\n"
                     );
@@ -1406,7 +1473,7 @@ public class MainActivity extends AppCompatActivity {
                     )) {
 
                         appendText(
-                                "[ELF] 内置文件安装失败\n"
+                                "[EXEC] 内置文件安装失败\n"
                         );
 
                         return;
@@ -1417,9 +1484,13 @@ public class MainActivity extends AppCompatActivity {
             if (!target.exists()) {
 
                 appendText(
-                        "[ELF] 文件不存在：\n"
+                        "[错误] 文件不存在：\n"
                                 + runtimePath
                                 + "\n"
+                );
+
+                appendText(
+                        "[提示] 请重新添加该脚本\n"
                 );
 
                 return;
@@ -1428,7 +1499,7 @@ public class MainActivity extends AppCompatActivity {
             if (!target.isFile()) {
 
                 appendText(
-                        "[ELF] 不是普通文件：\n"
+                        "[错误] 目标不是普通文件\n"
                                 + runtimePath
                                 + "\n"
                 );
@@ -1439,25 +1510,11 @@ public class MainActivity extends AppCompatActivity {
             if (target.length() == 0) {
 
                 appendText(
-                        "[ELF] 文件大小为 0\n"
+                        "[错误] 文件大小为 0\n"
                 );
 
                 return;
             }
-
-            appendText(
-                    "\n================================\n"
-            );
-
-            appendText(
-                    "[EXEC] 准备启动\n"
-            );
-
-            appendText(
-                    "[EXEC] Path："
-                            + runtimePath
-                            + "\n"
-            );
 
             appendText(
                     "[EXEC] Size："
@@ -1465,16 +1522,24 @@ public class MainActivity extends AppCompatActivity {
                             + " bytes\n"
             );
 
+            // ----------------------------------------------------
+            // chmod
+            // ----------------------------------------------------
+
             if (!chmod755(
                     runtimePath
             )) {
 
                 appendText(
-                        "[EXEC] chmod 755 失败\n"
+                        "[错误] chmod 755 失败\n"
                 );
 
                 return;
             }
+
+            // ----------------------------------------------------
+            // Root-side file inspection
+            // ----------------------------------------------------
 
             ElfInfo info =
                     inspectElfAsRoot(
@@ -1484,7 +1549,7 @@ public class MainActivity extends AppCompatActivity {
             if (info == null) {
 
                 appendText(
-                        "[EXEC] 无法读取文件信息\n"
+                        "[错误] 无法读取文件\n"
                 );
 
                 return;
@@ -1528,32 +1593,30 @@ public class MainActivity extends AppCompatActivity {
                     )) {
 
                         appendText(
-                                "[警告] ELF 指定的 interpreter 不存在：\n"
+                                "[错误] ELF interpreter 不存在：\n"
                                         + info.interpreter
                                         + "\n"
                         );
-                    } else {
 
-                        appendText(
-                                "[+] ELF interpreter 存在\n"
-                        );
+                        return;
                     }
+
+                    appendText(
+                            "[+] ELF interpreter 存在\n"
+                    );
                 }
 
             } else if (info.isShebang) {
 
                 appendText(
-                        "[EXEC] 检测到 Shell 脚本\n"
+                        "[Script] 检测到 Shell 脚本\n"
                 );
 
-                if (info.shebang != null) {
-
-                    appendText(
-                            "[Script] Interpreter："
-                                    + info.shebang
-                                    + "\n"
-                    );
-                }
+                appendText(
+                        "[Script] Shebang："
+                                + info.shebang
+                                + "\n"
+                );
 
             } else {
 
@@ -1561,22 +1624,36 @@ public class MainActivity extends AppCompatActivity {
                         "[错误] 文件既不是 ELF，也不是 Shell 脚本\n"
                 );
 
+                appendText(
+                        "[提示] 脚本必须以 #! 开头，例如：\n"
+                                + "#!/system/bin/sh\n"
+                );
+
                 return;
             }
+
+            // ----------------------------------------------------
+            // File permissions
+            // ----------------------------------------------------
 
             String lsOutput =
                     rootLs(
                             runtimePath
                     );
 
-            if (lsOutput != null) {
+            if (lsOutput != null
+                    && !lsOutput.trim().isEmpty()) {
 
                 appendText(
-                        "[EXEC] 文件权限："
+                        "[EXEC] 文件信息：\n"
                                 + lsOutput.trim()
                                 + "\n"
                 );
             }
+
+            // ----------------------------------------------------
+            // Work directory
+            // ----------------------------------------------------
 
             String workDir =
                     target.getParent();
@@ -1587,6 +1664,16 @@ public class MainActivity extends AppCompatActivity {
                 workDir =
                         RUNTIME_DIR;
             }
+
+            appendText(
+                    "[EXEC] WorkDir："
+                            + workDir
+                            + "\n"
+            );
+
+            // ----------------------------------------------------
+            // Environment
+            // ----------------------------------------------------
 
             StringBuilder env =
                     new StringBuilder();
@@ -1648,8 +1735,12 @@ public class MainActivity extends AppCompatActivity {
             );
 
             env.append(
-                    "; "
+                    " || exit $?; "
             );
+
+            // ----------------------------------------------------
+            // Build command
+            // ----------------------------------------------------
 
             String command;
 
@@ -1666,47 +1757,41 @@ public class MainActivity extends AppCompatActivity {
                         "[ELF] 执行方式：kernel direct exec\n"
                 );
 
-                if (info.elfClass != null) {
-
-                    appendText(
-                            "[ELF] 位数："
-                                    + info.elfClass
-                                    + "\n"
-                    );
-                }
-
-                if (info.machine != null) {
-
-                    appendText(
-                            "[ELF] 架构："
-                                    + info.machine
-                                    + "\n"
-                    );
-                }
-
-                if (info.interpreter != null) {
-
-                    appendText(
-                            "[ELF] Kernel interpreter："
-                                    + info.interpreter
-                                    + "\n"
-                    );
-                }
-
             } else {
 
-                String interpreter =
-                        resolveScriptInterpreter(
+                ScriptInterpreterResult interpreterResult =
+                        resolveScriptInterpreterDetailed(
                                 info.shebang
                         );
 
-                if (interpreter == null) {
+                if (!interpreterResult.success) {
 
                     appendText(
-                            "[脚本] 无法找到 interpreter\n"
+                            "[脚本] interpreter 解析失败\n"
+                                    + interpreterResult.error
+                                    + "\n"
                     );
 
                     return;
+                }
+
+                String interpreter =
+                        interpreterResult.interpreter;
+
+                appendText(
+                        "[脚本] Interpreter："
+                                + interpreter
+                                + "\n"
+                );
+
+                if (interpreterResult.arguments != null
+                        && !interpreterResult.arguments.isEmpty()) {
+
+                    appendText(
+                            "[脚本] Interpreter 参数："
+                                    + interpreterResult.arguments
+                                    + "\n"
+                    );
                 }
 
                 command =
@@ -1714,24 +1799,46 @@ public class MainActivity extends AppCompatActivity {
                                 + "exec "
                                 + shellQuote(
                                 interpreter
-                        )
-                                + " "
+                        );
+
+                if (interpreterResult.arguments != null
+                        && !interpreterResult.arguments.isEmpty()) {
+
+                    command +=
+                            " "
+                                    + interpreterResult.arguments;
+                }
+
+                command +=
+                        " "
                                 + shellQuote(
                                 target.getAbsolutePath()
                         );
 
                 appendText(
-                        "[脚本] 执行："
-                                + interpreter
-                                + "\n"
+                        "[Script] 执行方式：root shell + interpreter\n"
                 );
             }
 
+            // ----------------------------------------------------
+            // Final command
+            // ----------------------------------------------------
+
             appendText(
-                    "[EXEC] Shell command：\n"
+                    "[EXEC] 最终 root command：\n"
+                            + findSu()
+                            + " -c "
                             + command
                             + "\n"
             );
+
+            appendText(
+                    "[EXEC] 正在启动...\n"
+            );
+
+            // ----------------------------------------------------
+            // Start root shell
+            // ----------------------------------------------------
 
             ProcessBuilder pb =
                     new ProcessBuilder(
@@ -1755,11 +1862,28 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {
             }
 
-            process =
-                    pb.start();
+            Process currentProcess;
 
-            final Process currentProcess =
-                    process;
+            try {
+
+                currentProcess =
+                        pb.start();
+
+            } catch (Exception e) {
+
+                appendText(
+                        "\n[启动失败]\n"
+                                + "无法启动 su/root shell\n"
+                                + "错误："
+                                + safeMessage(e)
+                                + "\n"
+                );
+
+                return;
+            }
+
+            process =
+                    currentProcess;
 
             writer =
                     new BufferedWriter(
@@ -1774,152 +1898,66 @@ public class MainActivity extends AppCompatActivity {
                     true;
 
             appendText(
-                    "[+] Process 已启动\n"
+                    "[+] Root Process 已启动\n"
             );
 
             appendText(
-                    "[+] PID："
-                            + getProcessPid(
-                            currentProcess
-                    )
-                            + "\n"
+                    "[+] stdin 已连接\n"
+            );
+
+            appendText(
+                    "[+] stdout/stderr 已连接\n"
             );
 
             appendText(
                     "================================\n\n"
             );
 
+            // ----------------------------------------------------
+            // stdout
+            // ----------------------------------------------------
+
             Thread stdoutThread =
                     new Thread(() -> {
 
-                        try {
-
-                            InputStreamReader reader =
-                                    new InputStreamReader(
-                                            currentProcess
-                                                    .getInputStream(),
-                                            StandardCharsets.UTF_8
-                                    );
-
-                            char[] buffer =
-                                    new char[1024];
-
-                            int count;
-
-                            while ((count =
-                                    reader.read(buffer))
-                                    != -1) {
-
-                                if (count <= 0) {
-
-                                    continue;
-                                }
-
-                                String raw =
-                                        new String(
-                                                buffer,
-                                                0,
-                                                count
-                                        );
-
-                                String clean =
-                                        cleanElfOutput(
-                                                raw
-                                        );
-
-                                if (!clean.isEmpty()) {
-
-                                    appendText(
-                                            clean
-                                    );
-                                }
-                            }
-
-                        } catch (Exception e) {
-
-                            if (elfRunning) {
-
-                                appendText(
-                                        "[stdout 读取失败] "
-                                                + safeMessage(e)
-                                                + "\n"
-                                );
-                            }
-                        }
+                        readProcessStream(
+                                currentProcess
+                                        .getInputStream(),
+                                "stdout"
+                        );
 
                     });
 
             stdoutThread.setName(
-                    "ELF-stdout"
+                    "RootScript-stdout"
             );
+
+            // ----------------------------------------------------
+            // stderr
+            // ----------------------------------------------------
 
             Thread stderrThread =
                     new Thread(() -> {
 
-                        try {
-
-                            InputStreamReader reader =
-                                    new InputStreamReader(
-                                            currentProcess
-                                                    .getErrorStream(),
-                                            StandardCharsets.UTF_8
-                                    );
-
-                            char[] buffer =
-                                    new char[1024];
-
-                            int count;
-
-                            while ((count =
-                                    reader.read(buffer))
-                                    != -1) {
-
-                                if (count <= 0) {
-
-                                    continue;
-                                }
-
-                                String raw =
-                                        new String(
-                                                buffer,
-                                                0,
-                                                count
-                                        );
-
-                                String clean =
-                                        cleanElfOutput(
-                                                raw
-                                        );
-
-                                if (!clean.isEmpty()) {
-
-                                    appendText(
-                                            clean
-                                    );
-                                }
-                            }
-
-                        } catch (Exception e) {
-
-                            if (elfRunning) {
-
-                                appendText(
-                                        "[stderr 读取失败] "
-                                                + safeMessage(e)
-                                                + "\n"
-                                );
-                            }
-                        }
+                        readProcessStream(
+                                currentProcess
+                                        .getErrorStream(),
+                                "stderr"
+                        );
 
                     });
 
             stderrThread.setName(
-                    "ELF-stderr"
+                    "RootScript-stderr"
             );
 
             stdoutThread.start();
 
             stderrThread.start();
+
+            // ----------------------------------------------------
+            // Wait
+            // ----------------------------------------------------
 
             new Thread(() -> {
 
@@ -1929,33 +1967,46 @@ public class MainActivity extends AppCompatActivity {
                             currentProcess.waitFor();
 
                     try {
-
-                        stdoutThread.join(
-                                1500
-                        );
-
+                        stdoutThread.join(2000);
                     } catch (Exception ignored) {
                     }
 
                     try {
-
-                        stderrThread.join(
-                                1500
-                        );
-
+                        stderrThread.join(2000);
                     } catch (Exception ignored) {
                     }
 
                     appendText(
-                            "\n[PROCESS exit "
-                                    + exitCode
-                                    + "]\n"
+                            "\n================================\n"
                     );
+
+                    appendText(
+                            "[PROCESS] exit code = "
+                                    + exitCode
+                                    + "\n"
+                    );
+
+                    if (exitCode == 0) {
+
+                        appendText(
+                                "[PROCESS] 执行完成\n"
+                        );
+
+                    } else {
+
+                        appendText(
+                                "[PROCESS] 执行失败\n"
+                        );
+
+                        showExitCodeHint(
+                                exitCode
+                        );
+                    }
 
                 } catch (Exception e) {
 
                     appendText(
-                            "\n[PROCESS wait 失败] "
+                            "\n[PROCESS wait 失败]\n"
                                     + safeMessage(e)
                                     + "\n"
                     );
@@ -1975,7 +2026,7 @@ public class MainActivity extends AppCompatActivity {
 
                 }
 
-            }, "ELF-waiter").start();
+            }, "RootScript-waiter").start();
 
         } catch (Exception e) {
 
@@ -1987,10 +2038,158 @@ public class MainActivity extends AppCompatActivity {
                     false;
 
             appendText(
-                    "\n[ELF 启动失败]\n"
+                    "\n[EXEC 启动异常]\n"
                             + safeMessage(e)
                             + "\n"
             );
+        }
+    }
+
+    // ============================================================
+    // Process stream reader
+    // ============================================================
+
+    private void readProcessStream(
+            InputStream input,
+            String streamName
+    ) {
+
+        if (input == null) {
+
+            return;
+        }
+
+        try {
+
+            InputStreamReader reader =
+                    new InputStreamReader(
+                            input,
+                            StandardCharsets.UTF_8
+                    );
+
+            char[] buffer =
+                    new char[1024];
+
+            int count;
+
+            while ((count =
+                    reader.read(buffer))
+                    != -1) {
+
+                if (count <= 0) {
+
+                    continue;
+                }
+
+                String raw =
+                        new String(
+                                buffer,
+                                0,
+                                count
+                        );
+
+                String clean =
+                        cleanElfOutput(
+                                raw
+                        );
+
+                if (clean.isEmpty()) {
+
+                    continue;
+                }
+
+                if ("stderr".equals(
+                        streamName
+                )) {
+
+                    appendText(
+                            "[stderr] "
+                                    + clean
+                    );
+
+                } else {
+
+                    appendText(
+                            clean
+                    );
+                }
+            }
+
+        } catch (Exception e) {
+
+            if (elfRunning) {
+
+                appendText(
+                        "["
+                                + streamName
+                                + " 读取失败] "
+                                + safeMessage(e)
+                                + "\n"
+                );
+            }
+        }
+    }
+
+    // ============================================================
+    // Exit code explanation
+    // ============================================================
+
+    private void showExitCodeHint(
+            int exitCode
+    ) {
+
+        switch (exitCode) {
+
+            case 126:
+
+                appendText(
+                        "[诊断] exit 126：文件存在，但无法执行。\n"
+                                + "可能原因：权限、SELinux、架构、noexec 或 interpreter 问题。\n"
+                );
+
+                break;
+
+            case 127:
+
+                appendText(
+                        "[诊断] exit 127：命令或 interpreter 找不到。\n"
+                                + "请重点检查 shebang 和 PATH。\n"
+                );
+
+                break;
+
+            case 1:
+
+                appendText(
+                        "[诊断] exit 1：脚本自身返回了错误。\n"
+                                + "请查看上面的 [stderr] 输出。\n"
+                );
+
+                break;
+
+            case 2:
+
+                appendText(
+                        "[诊断] exit 2：Shell 参数/语法错误的可能性较高。\n"
+                                + "请查看上面的 [stderr] 输出。\n"
+                );
+
+                break;
+
+            default:
+
+                if (exitCode > 128) {
+
+                    appendText(
+                            "[诊断] exit "
+                                    + exitCode
+                                    + "，可能是信号终止："
+                                    + (exitCode - 128)
+                                    + "\n"
+                    );
+                }
+
+                break;
         }
     }
 
@@ -2002,9 +2201,8 @@ public class MainActivity extends AppCompatActivity {
             Process p
     ) {
 
-        // 当前 Android/Java 编译环境不提供
-        // Process.pid()，因此不调用该 API。
-        // 保留方法以兼容现有调用。
+        // Android 当前编译环境中不要调用 Process.pid()
+        // 保留该方法仅为了兼容旧调用。
         return -1;
     }
 
@@ -2096,7 +2294,10 @@ public class MainActivity extends AppCompatActivity {
             if (exitCode != 0) {
 
                 appendText(
-                        "[运行目录创建失败] "
+                        "[运行目录创建失败]\n"
+                                + "exit="
+                                + exitCode
+                                + "\n"
                                 + output
                                 + "\n"
                 );
@@ -2134,7 +2335,7 @@ public class MainActivity extends AppCompatActivity {
                             + shellQuote(
                             RUNTIME_DIR
                     )
-                            + "; "
+                            + " && "
                             + "cat "
                             + shellQuote(
                             source
@@ -2143,7 +2344,7 @@ public class MainActivity extends AppCompatActivity {
                             + shellQuote(
                             destination
                     )
-                            + "; "
+                            + " && "
                             + "chmod 755 "
                             + shellQuote(
                             destination
@@ -2169,7 +2370,10 @@ public class MainActivity extends AppCompatActivity {
             if (exitCode != 0) {
 
                 appendText(
-                        "[Root复制失败] "
+                        "[Root复制失败]\n"
+                                + "exit="
+                                + exitCode
+                                + "\n"
                                 + output
                                 + "\n"
                 );
@@ -2177,15 +2381,12 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             }
 
-            File destinationFile =
-                    new File(
-                            destination
-                    );
-
-            if (!destinationFile.exists()) {
+            if (!fileExistsAsRoot(
+                    destination
+            )) {
 
                 appendText(
-                        "[Root复制失败] 目标文件不存在\n"
+                        "[Root复制失败] Root 检查不到目标文件：\n"
                                 + destination
                                 + "\n"
                 );
@@ -2217,14 +2418,17 @@ public class MainActivity extends AppCompatActivity {
 
         try {
 
+            String command =
+                    "chmod 755 "
+                            + shellQuote(
+                            path
+                    );
+
             Process p =
                     new ProcessBuilder(
                             findSu(),
                             "-c",
-                            "chmod 755 "
-                                    + shellQuote(
-                                    path
-                            )
+                            command
                     )
                             .redirectErrorStream(true)
                             .start();
@@ -2240,8 +2444,12 @@ public class MainActivity extends AppCompatActivity {
             if (exitCode != 0) {
 
                 appendText(
-                        "[chmod失败] "
+                        "[chmod失败]\n"
+                                + "Path："
                                 + path
+                                + "\n"
+                                + "exit="
+                                + exitCode
                                 + "\n"
                                 + output
                                 + "\n"
@@ -2292,6 +2500,52 @@ public class MainActivity extends AppCompatActivity {
                     );
 
             p.waitFor();
+
+            return output;
+
+        } catch (Exception e) {
+
+            return null;
+        }
+    }
+
+    // ============================================================
+    // Root stat
+    // ============================================================
+
+    private String rootStat(
+            String path
+    ) {
+
+        try {
+
+            String command =
+                    "stat "
+                            + shellQuote(
+                            path
+                    );
+
+            Process p =
+                    new ProcessBuilder(
+                            findSu(),
+                            "-c",
+                            command
+                    )
+                            .redirectErrorStream(true)
+                            .start();
+
+            String output =
+                    readAll(
+                            p.getInputStream()
+                    );
+
+            int exitCode =
+                    p.waitFor();
+
+            if (exitCode != 0) {
+
+                return null;
+            }
 
             return output;
 
@@ -2375,12 +2629,33 @@ public class MainActivity extends AppCompatActivity {
                             ident
                     );
 
-            if (n < 4) {
+            if (n < 2) {
 
                 return info;
             }
 
-            if ((ident[0] & 0xff) == 0x7f
+            // ----------------------------------------------------
+            // UTF-8 BOM
+            // ----------------------------------------------------
+
+            int start =
+                    0;
+
+            if (n >= 3
+                    && (ident[0] & 0xff) == 0xef
+                    && (ident[1] & 0xff) == 0xbb
+                    && (ident[2] & 0xff) == 0xbf) {
+
+                start = 3;
+            }
+
+            // ----------------------------------------------------
+            // ELF
+            // ----------------------------------------------------
+
+            if (start == 0
+                    && n >= 4
+                    && (ident[0] & 0xff) == 0x7f
                     && (ident[1] & 0xff) == 0x45
                     && (ident[2] & 0xff) == 0x4c
                     && (ident[3] & 0xff) == 0x46) {
@@ -2673,48 +2948,76 @@ public class MainActivity extends AppCompatActivity {
                 return info;
             }
 
-            if ((ident[0] & 0xff) == '#'
-                    && (ident[1] & 0xff) == '!') {
+            // ----------------------------------------------------
+            // Read first line for shebang
+            // ----------------------------------------------------
 
-                info.isShebang = true;
+            fis.getChannel().position(0);
 
-                StringBuilder sb =
-                        new StringBuilder();
+            byte[] firstLine =
+                    new byte[4096];
 
-                sb.append(
-                        (char) ident[2]
-                );
-
-                sb.append(
-                        (char) ident[3]
-                );
-
-                for (int i = 4;
-                     i < ident.length;
-                     i++) {
-
-                    int c =
-                            ident[i] & 0xff;
-
-                    if (c == 0
-                            || c == '\n'
-                            || c == '\r') {
-
-                        break;
-                    }
-
-                    sb.append(
-                            (char) c
+            int read =
+                    fis.read(
+                            firstLine
                     );
-                }
 
-                info.shebang =
-                        sb.toString().trim();
+            if (read <= 0) {
 
                 return info;
             }
 
-        } catch (Exception ignored) {
+            int lineStart =
+                    0;
+
+            if (read >= 3
+                    && (firstLine[0] & 0xff) == 0xef
+                    && (firstLine[1] & 0xff) == 0xbb
+                    && (firstLine[2] & 0xff) == 0xbf) {
+
+                lineStart = 3;
+            }
+
+            if (read - lineStart >= 2
+                    && firstLine[lineStart] == '#'
+                    && firstLine[lineStart + 1] == '!') {
+
+                info.isShebang = true;
+
+                int end =
+                        lineStart + 2;
+
+                while (end < read) {
+
+                    int c =
+                            firstLine[end] & 0xff;
+
+                    if (c == '\n'
+                            || c == '\r'
+                            || c == 0) {
+
+                        break;
+                    }
+
+                    end++;
+                }
+
+                info.shebang =
+                        new String(
+                                firstLine,
+                                lineStart + 2,
+                                end - lineStart - 2,
+                                StandardCharsets.UTF_8
+                        )
+                                .trim();
+
+                return info;
+            }
+
+        } catch (Exception e) {
+
+            info.error =
+                    safeMessage(e);
 
         } finally {
 
@@ -2754,8 +3057,8 @@ public class MainActivity extends AppCompatActivity {
                             .redirectErrorStream(true)
                             .start();
 
-            java.io.ByteArrayOutputStream bos =
-                    new java.io.ByteArrayOutputStream();
+            ByteArrayOutputStream bos =
+                    new ByteArrayOutputStream();
 
             InputStream input =
                     p.getInputStream();
@@ -2797,16 +3100,34 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            p.waitFor();
+            int exitCode =
+                    p.waitFor();
 
             byte[] data =
                     bos.toByteArray();
+
+            if (exitCode != 0) {
+
+                appendText(
+                        "[Root读取失败] exit="
+                                + exitCode
+                                + "\n"
+                );
+
+                return new ElfInfo();
+            }
 
             return inspectElfBytes(
                     data
             );
 
         } catch (Exception e) {
+
+            appendText(
+                    "[Root读取异常] "
+                            + safeMessage(e)
+                            + "\n"
+            );
 
             return new ElfInfo();
         }
@@ -2824,28 +3145,39 @@ public class MainActivity extends AppCompatActivity {
                 new ElfInfo();
 
         if (data == null
-                || data.length < 4) {
+                || data.length < 2) {
 
             return info;
         }
 
-        if ((data[0] & 0xff) == 0x7f
-                && (data[1] & 0xff) == 0x45
-                && (data[2] & 0xff) == 0x4c
-                && (data[3] & 0xff) == 0x46) {
+        int start = 0;
+
+        if (data.length >= 3
+                && (data[0] & 0xff) == 0xef
+                && (data[1] & 0xff) == 0xbb
+                && (data[2] & 0xff) == 0xbf) {
+
+            start = 3;
+        }
+
+        if (data.length - start >= 4
+                && (data[start] & 0xff) == 0x7f
+                && (data[start + 1] & 0xff) == 0x45
+                && (data[start + 2] & 0xff) == 0x4c
+                && (data[start + 3] & 0xff) == 0x46) {
 
             info.isElf = true;
 
-            if (data.length < 16) {
+            if (data.length < start + 16) {
 
                 return info;
             }
 
             int cls =
-                    data[4] & 0xff;
+                    data[start + 4] & 0xff;
 
             int endian =
-                    data[5] & 0xff;
+                    data[start + 5] & 0xff;
 
             info.littleEndian =
                     endian == 1;
@@ -2868,16 +3200,16 @@ public class MainActivity extends AppCompatActivity {
 
             info.osAbi =
                     elfOsAbi(
-                            data[7] & 0xff
+                            data[start + 7] & 0xff
                     );
 
             if (cls == 1
-                    && data.length >= 52) {
+                    && data.length >= start + 52) {
 
                 int machine =
                         readU16(
                                 data,
-                                18,
+                                start + 18,
                                 info.littleEndian
                         );
 
@@ -2889,27 +3221,28 @@ public class MainActivity extends AppCompatActivity {
                 long phoff =
                         readU32(
                                 data,
-                                28,
+                                start + 28,
                                 info.littleEndian
                         );
 
                 int phentsize =
                         readU16(
                                 data,
-                                42,
+                                start + 42,
                                 info.littleEndian
                         );
 
                 int phnum =
                         readU16(
                                 data,
-                                44,
+                                start + 44,
                                 info.littleEndian
                         );
 
                 parseInterpreterFromBytes(
                         data,
                         true,
+                        start,
                         phoff,
                         phentsize,
                         phnum,
@@ -2917,12 +3250,12 @@ public class MainActivity extends AppCompatActivity {
                 );
 
             } else if (cls == 2
-                    && data.length >= 64) {
+                    && data.length >= start + 64) {
 
                 int machine =
                         readU16(
                                 data,
-                                18,
+                                start + 18,
                                 info.littleEndian
                         );
 
@@ -2934,27 +3267,28 @@ public class MainActivity extends AppCompatActivity {
                 long phoff =
                         readU64(
                                 data,
-                                32,
+                                start + 32,
                                 info.littleEndian
                         );
 
                 int phentsize =
                         readU16(
                                 data,
-                                54,
+                                start + 54,
                                 info.littleEndian
                         );
 
                 int phnum =
                         readU16(
                                 data,
-                                56,
+                                start + 56,
                                 info.littleEndian
                         );
 
                 parseInterpreterFromBytes(
                         data,
                         false,
+                        start,
                         phoff,
                         phentsize,
                         phnum,
@@ -2965,12 +3299,14 @@ public class MainActivity extends AppCompatActivity {
             return info;
         }
 
-        if ((data[0] & 0xff) == '#'
-                && (data[1] & 0xff) == '!') {
+        if (data.length - start >= 2
+                && data[start] == '#'
+                && data[start + 1] == '!') {
 
             info.isShebang = true;
 
-            int end = 2;
+            int end =
+                    start + 2;
 
             while (end < data.length) {
 
@@ -2990,10 +3326,11 @@ public class MainActivity extends AppCompatActivity {
             info.shebang =
                     new String(
                             data,
-                            2,
-                            end - 2,
+                            start + 2,
+                            end - start - 2,
                             StandardCharsets.UTF_8
-                    ).trim();
+                    )
+                            .trim();
         }
 
         return info;
@@ -3006,6 +3343,7 @@ public class MainActivity extends AppCompatActivity {
     private void parseInterpreterFromBytes(
             byte[] data,
             boolean elf32,
+            int dataStart,
             long phoff,
             int phentsize,
             int phnum,
@@ -3024,20 +3362,24 @@ public class MainActivity extends AppCompatActivity {
              i < phnum;
              i++) {
 
-            long offset =
+            long relativeOffset =
                     phoff
                             + ((long) i
                             * phentsize);
 
-            if (offset < 0
-                    || offset >= data.length
-                    || offset + phentsize > data.length) {
+            long absoluteOffset =
+                    dataStart
+                            + relativeOffset;
+
+            if (absoluteOffset < 0
+                    || absoluteOffset >= data.length
+                    || absoluteOffset + phentsize > data.length) {
 
                 break;
             }
 
             int base =
-                    (int) offset;
+                    (int) absoluteOffset;
 
             long pType =
                     readU32(
@@ -3089,8 +3431,17 @@ public class MainActivity extends AppCompatActivity {
 
             if (pOffset < 0
                     || pFilesz <= 0
-                    || pFilesz > 4096
-                    || pOffset >= data.length) {
+                    || pFilesz > 4096) {
+
+                return;
+            }
+
+            long absoluteStringOffset =
+                    dataStart
+                            + pOffset;
+
+            if (absoluteStringOffset < 0
+                    || absoluteStringOffset >= data.length) {
 
                 return;
             }
@@ -3098,22 +3449,22 @@ public class MainActivity extends AppCompatActivity {
             long end =
                     Math.min(
                             data.length,
-                            pOffset + pFilesz
+                            absoluteStringOffset + pFilesz
                     );
 
-            if (end <= pOffset) {
+            if (end <= absoluteStringOffset) {
 
                 return;
             }
 
-            int start =
-                    (int) pOffset;
+            int stringStart =
+                    (int) absoluteStringOffset;
 
             int finish =
                     (int) end;
 
             int zero =
-                    start;
+                    stringStart;
 
             while (zero < finish
                     && data[zero] != 0) {
@@ -3124,8 +3475,8 @@ public class MainActivity extends AppCompatActivity {
             info.interpreter =
                     new String(
                             data,
-                            start,
-                            zero - start,
+                            stringStart,
+                            zero - stringStart,
                             StandardCharsets.UTF_8
                     );
 
@@ -3348,91 +3699,170 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
+    // Script interpreter result
+    // ============================================================
+
+    private static class ScriptInterpreterResult {
+
+        boolean success = false;
+
+        String interpreter = null;
+
+        String arguments = "";
+
+        String error = "";
+    }
+
+    // ============================================================
     // Resolve script interpreter
     // ============================================================
 
-    private String resolveScriptInterpreter(
+    private ScriptInterpreterResult resolveScriptInterpreterDetailed(
             String shebang
     ) {
+
+        ScriptInterpreterResult result =
+                new ScriptInterpreterResult();
 
         if (shebang == null
                 || shebang.trim().isEmpty()) {
 
-            return "/system/bin/sh";
+            result.success = true;
+
+            result.interpreter =
+                    "/system/bin/sh";
+
+            return result;
         }
 
         String value =
-                shebang.trim();
+                shebang
+                        .replace(
+                                "\r",
+                                ""
+                        )
+                        .replace(
+                                "\u0000",
+                                ""
+                        )
+                        .trim();
+
+        if (value.isEmpty()) {
+
+            result.success = true;
+
+            result.interpreter =
+                    "/system/bin/sh";
+
+            return result;
+        }
 
         String[] parts =
-                value.split(
-                        "\\s+"
+                splitCommandLine(
+                        value
                 );
+
+        if (parts.length == 0) {
+
+            result.error =
+                    "shebang 为空";
+
+            return result;
+        }
 
         String interpreter =
                 parts[0];
 
-        if (fileExistsAsRoot(
-                interpreter
-        )) {
-
-            return interpreter;
-        }
+        // --------------------------------------------------------
+        // /usr/bin/env
+        // --------------------------------------------------------
 
         if ("/usr/bin/env".equals(
                 interpreter
         )
                 || "/bin/env".equals(
                 interpreter
+        )
+                || "/system/bin/env".equals(
+                interpreter
         )) {
 
-            if (parts.length >= 2) {
+            if (parts.length < 2) {
 
-                String name =
-                        parts[1];
+                result.error =
+                        "env shebang 没有指定 interpreter";
 
-                String[] paths = {
+                return result;
+            }
 
-                        "/system/bin/"
-                                + name,
+            String name =
+                    parts[1];
 
-                        "/system/xbin/"
-                                + name,
+            String[] paths = {
 
-                        "/data/local/tmp/"
-                                + name,
+                    "/system/bin/"
+                            + name,
 
-                        RUNTIME_DIR
-                                + "/"
-                                + name
-                };
+                    "/system/xbin/"
+                            + name,
 
-                for (String path :
-                        paths) {
+                    "/vendor/bin/"
+                            + name,
 
-                    if (fileExistsAsRoot(
-                            path
-                    )) {
+                    "/data/local/tmp/"
+                            + name,
 
-                        return path;
-                    }
+                    RUNTIME_DIR
+                            + "/"
+                            + name
+            };
+
+            for (String path :
+                    paths) {
+
+                if (fileExistsAsRoot(
+                        path
+                )) {
+
+                    result.success = true;
+
+                    result.interpreter =
+                            path;
+
+                    result.arguments =
+                            joinParts(
+                                    parts,
+                                    2
+                            );
+
+                    return result;
                 }
             }
 
-            return "/system/bin/sh";
+            result.error =
+                    "env 找不到 interpreter："
+                            + name
+                            + "\n已检查：\n"
+                            + joinLines(
+                            paths
+                    );
+
+            return result;
         }
+
+        // --------------------------------------------------------
+        // Normal interpreter
+        // --------------------------------------------------------
 
         if ("/bin/sh".equals(
                 interpreter
         )
                 || "/usr/bin/sh".equals(
                 interpreter
-        )
-                || "/system/bin/sh".equals(
-                interpreter
         )) {
 
-            return "/system/bin/sh";
+            interpreter =
+                    "/system/bin/sh";
         }
 
         if ("/bin/bash".equals(
@@ -3448,6 +3878,8 @@ public class MainActivity extends AppCompatActivity {
 
                     "/system/xbin/bash",
 
+                    "/vendor/bin/bash",
+
                     RUNTIME_DIR + "/bash"
             };
 
@@ -3458,12 +3890,293 @@ public class MainActivity extends AppCompatActivity {
                         path
                 )) {
 
-                    return path;
+                    result.success = true;
+
+                    result.interpreter =
+                            path;
+
+                    result.arguments =
+                            joinParts(
+                                    parts,
+                                    1
+                            );
+
+                    return result;
                 }
+            }
+
+            result.error =
+                    "bash 不存在。\n已检查：\n"
+                            + joinLines(
+                            bashPaths
+                    );
+
+            return result;
+        }
+
+        if (!interpreter.startsWith("/")) {
+
+            String[] searchPaths = {
+
+                    "/system/bin/"
+                            + interpreter,
+
+                    "/system/xbin/"
+                            + interpreter,
+
+                    "/vendor/bin/"
+                            + interpreter,
+
+                    RUNTIME_DIR
+                            + "/"
+                            + interpreter
+            };
+
+            for (String path :
+                    searchPaths) {
+
+                if (fileExistsAsRoot(
+                        path
+                )) {
+
+                    result.success = true;
+
+                    result.interpreter =
+                            path;
+
+                    result.arguments =
+                            joinParts(
+                                    parts,
+                                    1
+                            );
+
+                    return result;
+                }
+            }
+
+            result.error =
+                    "找不到 interpreter："
+                            + interpreter
+                            + "\n已检查：\n"
+                            + joinLines(
+                            searchPaths
+                    );
+
+            return result;
+        }
+
+        if (!fileExistsAsRoot(
+                interpreter
+        )) {
+
+            result.error =
+                    "shebang 指定的 interpreter 不存在：\n"
+                            + interpreter;
+
+            return result;
+        }
+
+        result.success = true;
+
+        result.interpreter =
+                interpreter;
+
+        result.arguments =
+                joinParts(
+                        parts,
+                        1
+                );
+
+        return result;
+    }
+
+    // ============================================================
+    // Compatibility wrapper
+    // ============================================================
+
+    private String resolveScriptInterpreter(
+            String shebang
+    ) {
+
+        ScriptInterpreterResult result =
+                resolveScriptInterpreterDetailed(
+                        shebang
+                );
+
+        if (!result.success) {
+
+            return null;
+        }
+
+        return result.interpreter;
+    }
+
+    // ============================================================
+    // Simple command line split
+    // ============================================================
+
+    private String[] splitCommandLine(
+            String value
+    ) {
+
+        ArrayList<String> parts =
+                new ArrayList<>();
+
+        StringBuilder current =
+                new StringBuilder();
+
+        boolean singleQuote = false;
+        boolean doubleQuote = false;
+        boolean escaped = false;
+
+        for (int i = 0;
+             i < value.length();
+             i++) {
+
+            char c =
+                    value.charAt(i);
+
+            if (escaped) {
+
+                current.append(c);
+
+                escaped = false;
+
+                continue;
+            }
+
+            if (c == '\\'
+                    && !singleQuote) {
+
+                escaped = true;
+
+                continue;
+            }
+
+            if (c == '\''
+                    && !doubleQuote) {
+
+                singleQuote =
+                        !singleQuote;
+
+                continue;
+            }
+
+            if (c == '"'
+                    && !singleQuote) {
+
+                doubleQuote =
+                        !doubleQuote;
+
+                continue;
+            }
+
+            if (Character.isWhitespace(c)
+                    && !singleQuote
+                    && !doubleQuote) {
+
+                if (current.length() > 0) {
+
+                    parts.add(
+                            current.toString()
+                    );
+
+                    current.setLength(0);
+                }
+
+            } else {
+
+                current.append(c);
             }
         }
 
-        return interpreter;
+        if (escaped) {
+
+            current.append('\\');
+        }
+
+        if (current.length() > 0) {
+
+            parts.add(
+                    current.toString()
+            );
+        }
+
+        return parts.toArray(
+                new String[0]
+        );
+    }
+
+    // ============================================================
+    // Join parts
+    // ============================================================
+
+    private String joinParts(
+            String[] parts,
+            int start
+    ) {
+
+        if (parts == null
+                || start >= parts.length) {
+
+            return "";
+        }
+
+        StringBuilder result =
+                new StringBuilder();
+
+        for (int i = start;
+             i < parts.length;
+             i++) {
+
+            if (result.length() > 0) {
+
+                result.append(" ");
+            }
+
+            result.append(
+                    shellQuote(
+                            parts[i]
+                    )
+            );
+        }
+
+        return result.toString();
+    }
+
+    // ============================================================
+    // Join lines
+    // ============================================================
+
+    private String joinLines(
+            String[] values
+    ) {
+
+        if (values == null) {
+
+            return "";
+        }
+
+        StringBuilder result =
+                new StringBuilder();
+
+        for (String value :
+                values) {
+
+            result.append(
+                    "  "
+            );
+
+            result.append(
+                    value
+            );
+
+            result.append(
+                    "\n"
+            );
+        }
+
+        return result.toString();
     }
 
     // ============================================================
@@ -3509,7 +4222,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+
+            result.append(
+                    safeMessage(e)
+            );
         }
 
         return result.toString();
@@ -3538,12 +4255,6 @@ public class MainActivity extends AppCompatActivity {
         text =
                 text.replaceAll(
                         "\\[(?:[0-9;?]+)m",
-                        ""
-                );
-
-        text =
-                text.replace(
-                        "公益倒卖死全家",
                         ""
                 );
 
@@ -3865,10 +4576,27 @@ public class MainActivity extends AppCompatActivity {
                                                             )
                                                             .start();
 
-                                            p.waitFor();
+                                            int exitCode =
+                                                    p.waitFor();
+
+                                            if (exitCode != 0) {
+
+                                                appendText(
+                                                        "[删除失败] exit="
+                                                                + exitCode
+                                                                + "\n"
+                                                );
+                                            }
+
                                         }
 
-                                    } catch (Exception ignored) {
+                                    } catch (Exception e) {
+
+                                        appendText(
+                                                "[删除异常] "
+                                                        + safeMessage(e)
+                                                        + "\n"
+                                        );
                                     }
 
                                 }).start();
@@ -3972,6 +4700,9 @@ public class MainActivity extends AppCompatActivity {
 
         String shebang =
                 null;
+
+        String error =
+                null;
     }
 
     // ============================================================
@@ -3985,4 +4716,4 @@ public class MainActivity extends AppCompatActivity {
 
         super.onDestroy();
     }
-                    }
+                }
