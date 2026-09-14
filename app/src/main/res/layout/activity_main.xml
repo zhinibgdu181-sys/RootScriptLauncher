@@ -52,7 +52,7 @@
             android:backgroundTint="#2196F3" />
     </LinearLayout>
 
-    <!-- 🛠️ 脚本列表：没弹键盘时占 55%，键盘弹出时 Java 代码会动态改小 -->
+    <!-- 脚本列表：没弹键盘时占 55% -->
     <ListView
         android:id="@+id/lvScripts"
         android:layout_width="match_parent"
@@ -64,7 +64,7 @@
         app:layout_constraintHeight_percent="0.55"
         app:layout_constraintTop_toBottomOf="@id/topBar" />
 
-    <!-- 终端输出区：占据剩余的 45% 空间 -->
+    <!-- 终端输出区 -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
@@ -82,7 +82,7 @@
             android:textColor="#00FF00"
             android:textSize="13sp"
             android:padding="12dp"
-            android:text="请点击上方「+ 添加」选择脚本。" />
+            android:text="请点击上方「+ 添加」选择脚本。\n" /> <!-- 🛠️ 加了 \n 换行 -->
     </ScrollView>
 
     <!-- 底部输入区 -->
