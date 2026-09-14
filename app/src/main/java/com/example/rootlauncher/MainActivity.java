@@ -11,7 +11,6 @@ import android.util.Base64;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -21,6 +20,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.constraintlayout.widget.ConstraintLayout;
 
@@ -43,7 +43,7 @@ public class MainActivity extends AppCompatActivity {
             "TIME_Cloud_Loader_Release_1732727.sh"
     };
 
-    // 签名校验（默认占位符会直接放行，千万不要改）
+    // 签名校验（默认占位符会直接放行，千万不要去改成真实的，否则会闪退）
     private static final String OFFICIAL_SIGNATURE = "你的正式签名Base64字符串==";
 
     // UI 控件
@@ -63,7 +63,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 签名校验
+        // 1. 签名校验
         if (!checkSignature()) {
             Toast.makeText(this, "签名校验失败，请使用官方版本！", Toast.LENGTH_LONG).show();
             finish();
@@ -72,10 +72,69 @@ public class MainActivity extends AppCompatActivity {
         }
 
         setContentView(R.layout.activity_main);
+
+        // 2. ★★★ 新增：先检查 Root 权限，如果没 Root，弹出提示框 ★★★
+        if (!checkRootPermission()) {
+            showRootDialog();
+            return; // 没 Root 就不往下走了，等弹窗里重新检测
+        }
+
+        // 3. 有 Root 权限，正常初始化界面和环境
         initViews();
         initEnvironment();
         initKeyboardListener();
         initListeners();
+        
+        // ★★★ 新增：强制初始化高度比例，保证脚本列表占 55%，终端占 45% ★★★
+        updateListHeight(0.55f);
+    }
+
+    // ====================== Root 检测与弹窗模块 ======================
+    /**
+     * 检查 Root 权限是否可用
+     */
+    private boolean checkRootPermission() {
+        Process process = null;
+        try {
+            process = Runtime.getRuntime().exec("su -c id");
+            BufferedReader in = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line = in.readLine();
+            // 如果返回的结果包含 uid=0，说明有 Root 权限
+            return line != null && line.contains("uid=0");
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false; // 捕获到异常（如 IOException），说明没有 Root 权限
+        } finally {
+            if (process != null) process.destroy();
+        }
+    }
+
+    /**
+     * 显示需要 Root 权限的弹窗
+     */
+    private void showRootDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("需要 Root 权限")
+                .setMessage("未找到可用的 su 环境（IOException）。\n请确保您的设备已获取 Root 权限。")
+                .setPositiveButton("重新检测", (dialog, which) -> {
+                    if (checkRootPermission()) {
+                        // 检测通过了，重新初始化界面和环境
+                        initViews();
+                        initEnvironment();
+                        initKeyboardListener();
+                        initListeners();
+                        updateListHeight(0.55f);
+                    } else {
+                        Toast.makeText(MainActivity.this, "仍未获取 Root 权限！", Toast.LENGTH_SHORT).show();
+                        showRootDialog(); // 再次弹窗
+                    }
+                })
+                .setNegativeButton("退出应用", (dialog, which) -> {
+                    finish();
+                    System.exit(0);
+                })
+                .setCancelable(false)
+                .show();
     }
 
     // ====================== 签名校验模块 ======================
@@ -121,7 +180,7 @@ public class MainActivity extends AppCompatActivity {
 
             executeSuCommand("chmod 755 " + TARGET_DIR + "/*");
 
-            // 修复 DNS 解析
+            // ★ 修复 DNS 解析，解决 nc: bad address
             String resolvPath = TARGET_DIR + "/resolv.conf";
             String dnsContent = "nameserver 114.114.114.114\\nnameserver 8.8.8.8\\n";
             executeSuCommand("echo -e \"" + dnsContent + "\" > " + resolvPath + " && chmod 644 " + resolvPath);
@@ -166,9 +225,9 @@ public class MainActivity extends AppCompatActivity {
         scrollView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
             int heightDiff = scrollView.getRootView().getHeight() - scrollView.getHeight();
             if (heightDiff > 500) {
-                updateListHeight(0.15f);
+                updateListHeight(0.15f); // 键盘弹起
             } else {
-                updateListHeight(0.55f);
+                updateListHeight(0.55f); // 键盘收起
             }
         });
     }
