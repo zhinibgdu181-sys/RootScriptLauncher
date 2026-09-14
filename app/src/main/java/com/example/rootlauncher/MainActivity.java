@@ -3,6 +3,7 @@ package com.example.rootlauncher;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -54,6 +55,9 @@ public class MainActivity extends AppCompatActivity {
     private ScriptAdapter adapter;
     private Process currentProcess;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    
+    // 核心标记：防止重复初始化
+    private boolean isInitialized = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -76,20 +80,26 @@ public class MainActivity extends AppCompatActivity {
         initViews();
         initEnvironment();
         initListeners();
-        
-        // 确保初始状态锁定为 70%
-        updateListHeight(0.70f);
+        isInitialized = true;
     }
 
-    // ====================== 键盘监听 ======================
+    // ====================== 键盘监听模块 ======================
     private void initKeyboardListener() {
-        scrollView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
-            int heightDiff = scrollView.getRootView().getHeight() - scrollView.getHeight();
-            if (heightDiff > 500) {
-                // 键盘弹起：列表缩小到 15%，终端区域被顶上去
+        final View rootView = findViewById(android.R.id.content);
+        rootView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            if (!isInitialized) return;
+
+            Rect r = new Rect();
+            rootView.getWindowVisibleDisplayFrame(r);
+            int screenHeight = rootView.getRootView().getHeight();
+            int keypadHeight = screenHeight - r.bottom;
+
+            // 如果键盘高度超过屏幕的 15%，说明键盘弹出了
+            if (keypadHeight > screenHeight * 0.15) {
+                // 键盘弹起：列表高度缩到 15%，终端跟着键盘上去
                 updateListHeight(0.15f);
             } else {
-                // 键盘收起：列表恢复 70%，终端恢复 30%
+                // 键盘收起：列表恢复 70%，终端保持短小
                 updateListHeight(0.70f);
             }
         });
@@ -97,8 +107,12 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateListHeight(float percent) {
         ConstraintLayout.LayoutParams params = (ConstraintLayout.LayoutParams) lvScripts.getLayoutParams();
+        // 强制设回0，确保百分比生效
+        params.height = 0; 
         params.matchConstraintPercentHeight = percent;
+        params.matchConstraintDefaultHeight = ConstraintLayout.LayoutParams.MATCH_CONSTRAINT_PERCENT;
         lvScripts.setLayoutParams(params);
+        lvScripts.requestLayout(); // 强制刷新
     }
     // =====================================================
 
@@ -127,7 +141,7 @@ public class MainActivity extends AppCompatActivity {
                         initViews();
                         initEnvironment();
                         initListeners();
-                        updateListHeight(0.70f); // 授权成功后，强制恢复 70% 布局
+                        isInitialized = true;
                     } else {
                         Toast.makeText(MainActivity.this, "仍未获取 Root 权限！", Toast.LENGTH_SHORT).show();
                         showRootDialog();
@@ -170,7 +184,7 @@ public class MainActivity extends AppCompatActivity {
         adapter = new ScriptAdapter(this, scriptList);
         lvScripts.setAdapter(adapter);
         
-        // 绑定键盘监听（放在这里，确保在界面初始化完成后就生效）
+        // 绑定键盘监听
         initKeyboardListener();
     }
 
@@ -192,7 +206,7 @@ public class MainActivity extends AppCompatActivity {
             mainHandler.post(() -> {
                 appendOutput("\n环境初始化完成，可以开始运行脚本。\n", "#00FF00");
                 refreshScriptList();
-                // 注意：这里绝对不再调用 updateListHeight，避免授权后触发高度重置！
+                // ★★★ 重点：这里绝对不要碰布局！不调用任何 updateListHeight ★★★
             });
         }).start();
     }
