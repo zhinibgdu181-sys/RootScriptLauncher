@@ -21,7 +21,7 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
         debug {
-            minifyEnabled false         // 测试包不混淆，方便看日志
+            minifyEnabled false         // 测试包不混淆
         }
     }
 
