@@ -38,7 +38,7 @@ import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
 
-    // 🛠️ 自定义的专属执行目录
+    // 专属执行目录
     private static final String TARGET_DIR = "/data/local/tmp/com.example.rootlauncher/files";
 
     private TextView tvOutput;
@@ -77,7 +77,6 @@ public class MainActivity extends AppCompatActivity {
                             InputStream is = getContentResolver().openInputStream(uri);
                             if (is == null) return;
 
-                            // 1. 先写到 App 私有目录（中转）
                             FileOutputStream fos = new FileOutputStream(tempFile);
                             byte[] buffer = new byte[8192];
                             int len;
@@ -87,12 +86,10 @@ public class MainActivity extends AppCompatActivity {
                             is.close();
                             fos.close();
 
-                            // 2. 通过 su 移动并赋权（注意先 mkdir -p 创建目录）
                             String cmd = "mkdir -p " + TARGET_DIR + " && cp " + shellQuote(tempFile.getAbsolutePath()) + " " + shellQuote(finalFile.getAbsolutePath()) + " && chmod 755 " + shellQuote(finalFile.getAbsolutePath());
                             Process p = Runtime.getRuntime().exec(new String[]{findSu(), "-c", cmd});
                             p.waitFor();
 
-                            // 3. 加入列表
                             scriptList.add(finalFile.getAbsolutePath());
                             adapter.notifyDataSetChanged();
                             saveScripts();
@@ -118,14 +115,12 @@ public class MainActivity extends AppCompatActivity {
         adapter = new ScriptAdapter();
         lvScripts.setAdapter(adapter);
 
-        // 🛠️ 初始化：在 onCreate 阶段提前创建好这个专属目录
         new Thread(() -> {
             try {
                 Runtime.getRuntime().exec(new String[]{findSu(), "-c", "mkdir -p " + TARGET_DIR}).waitFor();
             } catch (Exception ignored) {}
         }).start();
 
-        // 自动提取并安装预设脚本到专属目录
         extractDefaultScriptsToTmp();
 
         btnAdd.setOnClickListener(v -> {
@@ -162,9 +157,6 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // ============================================================
-    // 从 assets 提取预设脚本，并移动到专属目录
-    // ============================================================
     private void extractDefaultScriptsToTmp() {
         String[] defaultScripts = {
                 "Kairos_Driver_Loader_Release_90f76e9.sh",
@@ -178,7 +170,6 @@ public class MainActivity extends AppCompatActivity {
             File finalFile = new File(TARGET_DIR, scriptName);
 
             try {
-                // 1. 从 assets 提取到私有目录
                 if (!tempFile.exists()) {
                     InputStream is = getAssets().open(scriptName);
                     FileOutputStream fos = new FileOutputStream(tempFile);
@@ -191,14 +182,12 @@ public class MainActivity extends AppCompatActivity {
                     fos.close();
                 }
 
-                // 2. 移动到专属目录并赋权
                 if (!finalFile.exists()) {
                     String cmd = "mkdir -p " + TARGET_DIR + " && cp " + shellQuote(tempFile.getAbsolutePath()) + " " + shellQuote(finalFile.getAbsolutePath()) + " && chmod 755 " + shellQuote(finalFile.getAbsolutePath());
                     Process p = Runtime.getRuntime().exec(new String[]{findSu(), "-c", cmd});
                     p.waitFor();
                 }
 
-                // 3. 加入列表
                 if (!scriptList.contains(finalFile.getAbsolutePath())) {
                     scriptList.add(finalFile.getAbsolutePath());
                     hasNew = true;
@@ -213,9 +202,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ============================================================
-    // 键盘监听：弹出键盘时缩小列表至 15%，收回键盘恢复 55%
-    // ============================================================
     private void setKeyboardListener() {
         final View rootView = findViewById(android.R.id.content);
         rootView.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
@@ -254,7 +240,6 @@ public class MainActivity extends AppCompatActivity {
         etInput.setText("");
         new Thread(() -> {
             try {
-                // PATH 里加上专属目录，且 cd 进去
                 String finalCmd = "export PATH=" + TARGET_DIR + ":/system/bin:/system/xbin:/vendor/bin:$PATH; cd " + TARGET_DIR + "; " + cmd;
                 ProcessBuilder pb = new ProcessBuilder(findSu(), "-c", finalCmd);
                 pb.redirectErrorStream(true);
@@ -355,9 +340,7 @@ public class MainActivity extends AppCompatActivity {
             }
 
             String suCmd = findSu();
-            
-            // 🛠️ 执行目录就是我们的专属目录
-            String elfDir = TARGET_DIR; 
+            String elfDir = TARGET_DIR;
 
             String env = 
                     "export PATH=" + shellQuote(TARGET_DIR + ":/system/bin:/system/xbin:/vendor/bin") + ":$PATH; " +
@@ -445,7 +428,6 @@ public class MainActivity extends AppCompatActivity {
 
             if (!tempFile.exists() || tempFile.length() < 100000) return false;
 
-            // busybox 也放进专属目录
             busyboxFile = new File(TARGET_DIR, "busybox");
             String src = shellQuote(tempFile.getAbsolutePath());
             String dst = shellQuote(busyboxFile.getAbsolutePath());
@@ -540,7 +522,17 @@ public class MainActivity extends AppCompatActivity {
 
             tvName.setText(fileName);
             btnRun.setOnClickListener(v -> runElf(path));
+            
+            // 🛠️ 核心修改：删除时同时删除物理文件
             btnDelete.setOnClickListener(v -> {
+                // 1. 通过 Root 权限物理删除文件
+                new Thread(() -> {
+                    try {
+                        Runtime.getRuntime().exec(new String[]{findSu(), "-c", "rm -rf " + shellQuote(path)}).waitFor();
+                    } catch (Exception ignored) {}
+                }).start();
+
+                // 2. 从列表记录中移除
                 scriptList.remove(position);
                 adapter.notifyDataSetChanged();
                 saveScripts();
