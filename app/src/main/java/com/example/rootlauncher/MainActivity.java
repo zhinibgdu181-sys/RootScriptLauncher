@@ -22,6 +22,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.constraintlayout.widget.ConstraintLayout;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -35,24 +36,20 @@ import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
-    // 核心目录
     private static final String TARGET_DIR = "/data/local/tmp/com.example.rootlauncher/files";
     private static final String[] DEFAULT_SCRIPTS = {
             "Kairos_Driver_Loader_Release_90f76e9.sh",
             "TIME_Cloud_Loader_Release_1732727.sh"
     };
 
-    // 签名校验（默认占位符会直接放行）
     private static final String OFFICIAL_SIGNATURE = "你的正式签名Base64字符串==";
 
-    // UI 控件
     private ListView lvScripts;
     private ScrollView scrollView;
     private TextView tvOutput;
     private EditText etInput;
     private Button btnAdd, btnSend;
 
-    // 数据
     private final List<String> scriptList = new ArrayList<>();
     private ScriptAdapter adapter;
     private Process currentProcess;
@@ -62,7 +59,6 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 1. 签名校验
         if (!checkSignature()) {
             Toast.makeText(this, "签名校验失败，请使用官方版本！", Toast.LENGTH_LONG).show();
             finish();
@@ -72,17 +68,39 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        // 2. 检查 Root 权限
         if (!checkRootPermission()) {
             showRootDialog();
             return;
         }
 
-        // 3. 有 Root 权限，正常初始化
         initViews();
         initEnvironment();
         initListeners();
+        
+        // 确保初始状态锁定为 70%
+        updateListHeight(0.70f);
     }
+
+    // ====================== 键盘监听 ======================
+    private void initKeyboardListener() {
+        scrollView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            int heightDiff = scrollView.getRootView().getHeight() - scrollView.getHeight();
+            if (heightDiff > 500) {
+                // 键盘弹起：列表缩小到 15%，终端区域被顶上去
+                updateListHeight(0.15f);
+            } else {
+                // 键盘收起：列表恢复 70%，终端恢复 30%
+                updateListHeight(0.70f);
+            }
+        });
+    }
+
+    private void updateListHeight(float percent) {
+        ConstraintLayout.LayoutParams params = (ConstraintLayout.LayoutParams) lvScripts.getLayoutParams();
+        params.matchConstraintPercentHeight = percent;
+        lvScripts.setLayoutParams(params);
+    }
+    // =====================================================
 
     // ====================== Root 检测与弹窗模块 ======================
     private boolean checkRootPermission() {
@@ -109,6 +127,7 @@ public class MainActivity extends AppCompatActivity {
                         initViews();
                         initEnvironment();
                         initListeners();
+                        updateListHeight(0.70f); // 授权成功后，强制恢复 70% 布局
                     } else {
                         Toast.makeText(MainActivity.this, "仍未获取 Root 权限！", Toast.LENGTH_SHORT).show();
                         showRootDialog();
@@ -150,6 +169,9 @@ public class MainActivity extends AppCompatActivity {
 
         adapter = new ScriptAdapter(this, scriptList);
         lvScripts.setAdapter(adapter);
+        
+        // 绑定键盘监听（放在这里，确保在界面初始化完成后就生效）
+        initKeyboardListener();
     }
 
     private void initEnvironment() {
@@ -170,6 +192,7 @@ public class MainActivity extends AppCompatActivity {
             mainHandler.post(() -> {
                 appendOutput("\n环境初始化完成，可以开始运行脚本。\n", "#00FF00");
                 refreshScriptList();
+                // 注意：这里绝对不再调用 updateListHeight，避免授权后触发高度重置！
             });
         }).start();
     }
