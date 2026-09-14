@@ -1,14 +1,12 @@
 package com.example.rootlauncher;
 
-import android.content.Context;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-import android.graphics.Rect;
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.text.TextUtils;
-import android.util.Base64;
+import android.provider.OpenableColumns;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -18,183 +16,405 @@ import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.constraintlayout.widget.ConstraintLayout;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String TARGET_DIR =
-            "/data/local/tmp/com.example.rootlauncher/files";
-
-    private static final String[] DEFAULT_SCRIPTS = {
-            "Kairos_Driver_Loader_Release_90f76e9.sh",
-            "TIME_Cloud_Loader_Release_1732727.sh"
-    };
-
-    /*
-     * 如果还没有正式签名，就保持这个占位值。
-     * 占位状态下允许运行。
-     */
-    private static final String OFFICIAL_SIGNATURE =
-            "你的正式签名Base64字符串==";
-
-    private ListView lvScripts;
-    private ScrollView scrollView;
     private TextView tvOutput;
     private EditText etInput;
-    private Button btnAdd;
-    private Button btnSend;
+    private ScrollView scrollView;
+    private ListView lvScripts;
 
-    private final List<String> scriptList =
-            new ArrayList<>();
-
+    private final ArrayList<String> scriptList = new ArrayList<>();
     private ScriptAdapter adapter;
 
-    private volatile Process currentProcess;
+    /*
+     * 当前正在运行的 ELF 进程。
+     */
+    private volatile Process process;
 
-    private final Handler mainHandler =
-            new Handler(Looper.getMainLooper());
+    /*
+     * ELF 的 stdin。
+     *
+     * 这是最重要的输入通道。
+     */
+    private volatile BufferedWriter writer;
 
-    private boolean isInitialized = false;
+    /*
+     * 防止进程刚启动、writer 尚未建立时误发送。
+     */
+    private volatile boolean elfRunning = false;
+
+    private String pendingScriptPath = null;
+
+    private android.content.SharedPreferences prefs;
+
+    /*
+     * 安装后的 BusyBox。
+     */
+    private File busyboxFile;
+
 
     // ============================================================
-    // Activity
+    // 文件选择器
+    // ============================================================
+
+    private final androidx.activity.result.ActivityResultLauncher<Intent> filePickerLauncher =
+            registerForActivityResult(
+                    new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+                    result -> {
+
+                        if (result.getResultCode() != Activity.RESULT_OK) {
+                            return;
+                        }
+
+                        if (result.getData() == null) {
+                            return;
+                        }
+
+                        Uri uri = result.getData().getData();
+
+                        if (uri == null) {
+                            return;
+                        }
+
+                        String displayName = getFileName(uri);
+
+                        if (displayName == null || displayName.length() == 0) {
+                            displayName =
+                                    "script_" + System.currentTimeMillis() + ".sh";
+                        }
+
+                        File destFile =
+                                new File(getFilesDir(), displayName);
+
+                        try {
+
+                            InputStream is =
+                                    getContentResolver().openInputStream(uri);
+
+                            if (is == null) {
+                                return;
+                            }
+
+                            FileOutputStream fos =
+                                    new FileOutputStream(destFile);
+
+                            byte[] buffer = new byte[8192];
+
+                            int len;
+
+                            while ((len = is.read(buffer)) > 0) {
+                                fos.write(buffer, 0, len);
+                            }
+
+                            is.close();
+                            fos.close();
+
+                            /*
+                             * 给 ELF / 脚本执行权限。
+                             */
+                            Process chmod =
+                                    new ProcessBuilder(
+                                            "chmod",
+                                            "755",
+                                            destFile.getAbsolutePath()
+                                    )
+                                            .redirectErrorStream(true)
+                                            .start();
+
+                            chmod.waitFor();
+
+                            scriptList.add(
+                                    destFile.getAbsolutePath()
+                            );
+
+                            adapter.notifyDataSetChanged();
+
+                            saveScripts();
+
+                        } catch (Exception ignored) {
+                        }
+                    }
+            );
+
+
+    // ============================================================
+    // onCreate
     // ============================================================
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+
         super.onCreate(savedInstanceState);
-
-        // 签名检查
-        if (!checkSignature()) {
-            Toast.makeText(
-                    this,
-                    "签名校验失败，请使用官方版本！",
-                    Toast.LENGTH_LONG
-            ).show();
-
-            finish();
-            return;
-        }
 
         setContentView(R.layout.activity_main);
 
-        // Root 检查
-        if (!checkRootPermission()) {
-            showRootDialog();
-            return;
-        }
+        tvOutput = findViewById(R.id.tvOutput);
+        etInput = findViewById(R.id.etInput);
+        scrollView = findViewById(R.id.scrollView);
+        lvScripts = findViewById(R.id.lvScripts);
 
-        initViews();
+        Button btnAdd =
+                findViewById(R.id.btnAdd);
 
-        initEnvironment();
+        Button btnSend =
+                findViewById(R.id.btnSend);
 
-        initListeners();
+        prefs =
+                getSharedPreferences(
+                        "script_prefs",
+                        MODE_PRIVATE
+                );
 
-        isInitialized = true;
+        Set<String> savedScripts =
+                prefs.getStringSet(
+                        "scripts",
+                        new HashSet<>()
+                );
 
-        updateListHeight(0.45f);
+        scriptList.addAll(savedScripts);
+
+        adapter = new ScriptAdapter();
+
+        lvScripts.setAdapter(adapter);
+
+
+        // ========================================================
+        // 添加 ELF / 脚本
+        // ========================================================
+
+        btnAdd.setOnClickListener(v -> {
+
+            Intent intent =
+                    new Intent(Intent.ACTION_GET_CONTENT);
+
+            intent.setType("*/*");
+
+            intent.addCategory(
+                    Intent.CATEGORY_OPENABLE
+            );
+
+            filePickerLauncher.launch(intent);
+        });
+
+
+        // ========================================================
+        // 发送输入
+        // ========================================================
+
+        btnSend.setOnClickListener(v -> {
+
+            String input =
+                    etInput.getText().toString();
+
+            if (input.length() == 0) {
+                return;
+            }
+
+            /*
+             * 如果 ELF 正在运行，并且 stdin 已经建立，
+             * 输入必须发送给 ELF。
+             */
+            if (elfRunning
+                    && process != null
+                    && writer != null) {
+
+                sendInputToElf(input);
+
+                return;
+            }
+
+            /*
+             * 当前没有 ELF 运行，
+             * 才允许把输入作为 root shell 命令执行。
+             */
+            executeCommand(input);
+        });
+
+
+        // ========================================================
+        // 检查 Root
+        // ========================================================
+
+        new Thread(() -> {
+
+            if (!checkRoot()) {
+                showRootDialog();
+            }
+
+        }).start();
     }
+
 
     // ============================================================
-    // 键盘监听
+    // 向 ELF stdin 发送输入
     // ============================================================
 
-    private void initKeyboardListener() {
+    private void sendInputToElf(String input) {
 
-        final View rootView =
-                findViewById(android.R.id.content);
+        try {
 
-        rootView.getViewTreeObserver()
-                .addOnGlobalLayoutListener(() -> {
+            BufferedWriter currentWriter = writer;
 
-                    if (!isInitialized) {
-                        return;
-                    }
+            Process currentProcess = process;
 
-                    Rect r = new Rect();
+            if (currentWriter == null
+                    || currentProcess == null
+                    || !elfRunning) {
 
-                    rootView
-                            .getWindowVisibleDisplayFrame(r);
+                appendText(
+                        "\n[输入通道尚未建立]\n"
+                );
 
-                    int screenHeight =
-                            rootView.getRootView().getHeight();
+                return;
+            }
 
-                    int keypadHeight =
-                            screenHeight - r.bottom;
+            /*
+             * 不在界面显示 >>> 1。
+             */
 
-                    if (keypadHeight >
-                            screenHeight * 0.15f) {
+            currentWriter.write(input);
+            currentWriter.newLine();
+            currentWriter.flush();
 
-                        // 键盘弹出
-                        updateListHeight(0.15f);
+            etInput.post(() ->
+                    etInput.setText("")
+            );
 
-                    } else {
+        } catch (Exception e) {
 
-                        // 键盘收起
-                        updateListHeight(0.45f);
-                    }
-                });
+            appendText(
+                    "\n[输入失败] "
+                            + e.getMessage()
+                            + "\n"
+            );
+        }
     }
 
-    private void updateListHeight(float percent) {
 
-        if (lvScripts == null) {
-            return;
-        }
+    // ============================================================
+    // 直接执行 root 命令
+    //
+    // 仅用于没有 ELF 运行时的调试。
+    // ============================================================
 
-        ViewGroup.LayoutParams rawParams =
-                lvScripts.getLayoutParams();
+    private void executeCommand(String cmd) {
 
-        if (!(rawParams instanceof
-                ConstraintLayout.LayoutParams)) {
-            return;
-        }
+        etInput.setText("");
 
-        ConstraintLayout.LayoutParams params =
-                (ConstraintLayout.LayoutParams) rawParams;
+        new Thread(() -> {
 
-        params.height = 0;
+            try {
 
-        params.matchConstraintPercentHeight =
-                percent;
+                String finalCmd =
+                        "export PATH=/data/local/tmp:/system/bin:/system/xbin:/vendor/bin:$PATH; "
+                                + cmd;
 
-        params.matchConstraintDefaultHeight =
-                ConstraintLayout.LayoutParams
-                        .MATCH_CONSTRAINT_PERCENT;
+                ProcessBuilder pb =
+                        new ProcessBuilder(
+                                findSu(),
+                                "-c",
+                                finalCmd
+                        );
 
-        lvScripts.setLayoutParams(params);
+                pb.redirectErrorStream(true);
 
-        lvScripts.requestLayout();
+                Process p = pb.start();
+
+                BufferedReader reader =
+                        new BufferedReader(
+                                new InputStreamReader(
+                                        p.getInputStream()
+                                )
+                        );
+
+                char[] buffer = new char[1024];
+
+                int count;
+
+                while ((count = reader.read(buffer)) != -1) {
+
+                    if (count <= 0) {
+                        continue;
+                    }
+
+                    final String rawOutput =
+                            new String(
+                                    buffer,
+                                    0,
+                                    count
+                            );
+
+                    final String cleanOutput =
+                            cleanElfOutput(rawOutput);
+
+                    if (cleanOutput.length() > 0) {
+
+                        runOnUiThread(() ->
+                                appendText(cleanOutput)
+                        );
+                    }
+                }
+
+                p.waitFor();
+
+            } catch (Exception ignored) {
+            }
+
+        }).start();
     }
+
+
+    // ============================================================
+    // 查找 su
+    // ============================================================
+
+    private String findSu() {
+
+        String[] suPaths = {
+                "/system/bin/su",
+                "/system/xbin/su",
+                "/sbin/su",
+                "/debug_ramdisk/su"
+        };
+
+        for (String path : suPaths) {
+
+            if (new File(path).exists()) {
+                return path;
+            }
+        }
+
+        return "su";
+    }
+
 
     // ============================================================
     // Root 检查
     // ============================================================
 
-    private boolean checkRootPermission() {
-
-        Process process = null;
+    private boolean checkRoot() {
 
         try {
 
-            process =
+            Process p =
                     new ProcessBuilder(
-                            "su",
+                            findSu(),
                             "-c",
                             "id"
                     )
@@ -204,7 +424,7 @@ public class MainActivity extends AppCompatActivity {
             BufferedReader reader =
                     new BufferedReader(
                             new InputStreamReader(
-                                    process.getInputStream()
+                                    p.getInputStream()
                             )
                     );
 
@@ -213,425 +433,527 @@ public class MainActivity extends AppCompatActivity {
 
             String line;
 
-            while ((line =
-                    reader.readLine()) != null) {
+            while ((line = reader.readLine()) != null) {
 
-                output.append(line)
-                        .append('\n');
+                output.append(line);
             }
 
             int exitCode =
-                    process.waitFor();
+                    p.waitFor();
 
-            return exitCode == 0 &&
-                    output.toString()
-                            .contains("uid=0");
+            return exitCode == 0
+                    && output.toString().contains("uid=0");
 
         } catch (Exception e) {
 
             return false;
-
-        } finally {
-
-            if (process != null) {
-                process.destroy();
-            }
         }
     }
+
+
+    // ============================================================
+    // Root 弹窗
+    // ============================================================
 
     private void showRootDialog() {
 
-        new AlertDialog.Builder(this)
+        runOnUiThread(() -> {
 
-                .setTitle("需要 Root 权限")
+            new AlertDialog.Builder(
+                    MainActivity.this
+            )
+                    .setTitle("需要 root 权限")
 
-                .setMessage(
-                        "本应用需要 Root 权限才能运行 ELF。\n\n" +
-                        "请在 KernelSU / Magisk 中允许本应用，" +
-                        "然后重新检测。"
-                )
+                    .setMessage(
+                            "本软件需要 root 权限才能执行 ELF。\n\n"
+                                    + "请在 KernelSU / Magisk 中允许本应用，"
+                                    + "然后点击「重试」。"
+                    )
 
-                .setPositiveButton(
-                        "重新检测",
-                        (dialog, which) -> {
+                    .setPositiveButton(
+                            "重试",
+                            (dialog, which) -> {
 
-                            new Thread(() -> {
+                                new Thread(() -> {
 
-                                if (checkRootPermission()) {
+                                    if (checkRoot()) {
 
-                                    mainHandler.post(() -> {
+                                        if (pendingScriptPath != null) {
 
-                                        initViews();
+                                            String path =
+                                                    pendingScriptPath;
 
-                                        initEnvironment();
+                                            pendingScriptPath =
+                                                    null;
 
-                                        initListeners();
+                                            runElfReal(path);
+                                        }
 
-                                        isInitialized = true;
-
-                                        updateListHeight(
-                                                0.45f
-                                        );
-                                    });
-
-                                } else {
-
-                                    mainHandler.post(() -> {
-
-                                        Toast.makeText(
-                                                MainActivity.this,
-                                                "仍未获取 Root 权限！",
-                                                Toast.LENGTH_SHORT
-                                        ).show();
+                                    } else {
 
                                         showRootDialog();
-                                    });
-                                }
+                                    }
 
-                            }).start();
-                        }
-                )
+                                }).start();
+                            }
+                    )
 
-                .setNegativeButton(
-                        "退出应用",
-                        (dialog, which) -> finish()
-                )
+                    .setNegativeButton(
+                            "退出",
+                            (dialog, which) ->
+                                    finish()
+                    )
 
-                .setCancelable(false)
+                    .setCancelable(false)
 
-                .show();
+                    .show();
+        });
     }
 
+
     // ============================================================
-    // 签名检查
+    // Shell 参数安全引用
     // ============================================================
 
-    private boolean checkSignature() {
+    private String shellQuote(String value) {
 
-        try {
-
-            PackageManager pm =
-                    getPackageManager();
-
-            PackageInfo packageInfo;
-
-            if (android.os.Build.VERSION.SDK_INT >= 28) {
-
-                packageInfo =
-                        pm.getPackageInfo(
-                                getPackageName(),
-                                PackageManager
-                                        .GET_SIGNING_CERTIFICATES
-                        );
-
-                if (packageInfo.signingInfo ==
-                        null) {
-                    return false;
-                }
-
-                android.content.pm.Signature[] signatures =
-                        packageInfo.signingInfo
-                                .getApkContentsSigners();
-
-                if (signatures == null ||
-                        signatures.length == 0) {
-                    return false;
-                }
-
-                byte[] data =
-                        signatures[0].toByteArray();
-
-                String currentSig =
-                        Base64.encodeToString(
-                                data,
-                                Base64.DEFAULT
-                        );
-
-                // 尚未配置正式签名
-                if (OFFICIAL_SIGNATURE.equals(
-                        "你的正式签名Base64字符串==")) {
-
-                    return true;
-                }
-
-                return currentSig.trim().equals(
-                        OFFICIAL_SIGNATURE.trim()
-                );
-
-            } else {
-
-                packageInfo =
-                        pm.getPackageInfo(
-                                getPackageName(),
-                                PackageManager.GET_SIGNATURES
-                        );
-
-                if (packageInfo.signatures ==
-                        null ||
-                        packageInfo.signatures.length == 0) {
-                    return false;
-                }
-
-                String currentSig =
-                        Base64.encodeToString(
-                                packageInfo.signatures[0]
-                                        .toByteArray(),
-                                Base64.DEFAULT
-                        );
-
-                if (OFFICIAL_SIGNATURE.equals(
-                        "你的正式签名Base64字符串==")) {
-
-                    return true;
-                }
-
-                return currentSig.trim().equals(
-                        OFFICIAL_SIGNATURE.trim()
-                );
-            }
-
-        } catch (Exception e) {
-
-            e.printStackTrace();
-
-            return false;
+        if (value == null) {
+            return "''";
         }
+
+        return "'"
+                + value.replace(
+                        "'",
+                        "'\\''"
+                )
+                + "'";
     }
 
-    // ============================================================
-    // View 初始化
-    // ============================================================
-
-    private void initViews() {
-
-        lvScripts =
-                findViewById(R.id.lvScripts);
-
-        scrollView =
-                findViewById(R.id.scrollView);
-
-        tvOutput =
-                findViewById(R.id.tvOutput);
-
-        etInput =
-                findViewById(R.id.etInput);
-
-        btnAdd =
-                findViewById(R.id.btnAdd);
-
-        btnSend =
-                findViewById(R.id.btnSend);
-
-        adapter =
-                new ScriptAdapter(
-                        this,
-                        scriptList
-                );
-
-        lvScripts.setAdapter(adapter);
-
-        initKeyboardListener();
-    }
 
     // ============================================================
-    // 环境初始化
+    // 启动 ELF
     // ============================================================
 
-    private void initEnvironment() {
+    private void runElf(String scriptPath) {
 
         new Thread(() -> {
 
-            try {
+            if (!checkRoot()) {
 
-                /*
-                 * 创建 Root 目录。
-                 */
-                boolean mkdirOk =
-                        executeSuCommand(
-                                "mkdir -p " +
-                                shellQuote(TARGET_DIR)
-                        );
+                pendingScriptPath =
+                        scriptPath;
 
-                if (!mkdirOk) {
+                showRootDialog();
 
-                    showError(
-                            "无法创建 Root 目录：\n" +
-                            TARGET_DIR
-                    );
-
-                    return;
-                }
-
-                /*
-                 * BusyBox：
-                 *
-                 * assets
-                 *   ↓
-                 * App 私有目录
-                 *   ↓
-                 * su
-                 *   ↓
-                 * /data/local/tmp
-                 */
-                boolean busyboxOk =
-                        installAssetAsRoot(
-                                "busybox",
-                                TARGET_DIR +
-                                        "/busybox"
-                        );
-
-                if (!busyboxOk) {
-
-                    showError(
-                            "BusyBox 安装失败。\n\n" +
-                            "目标路径：\n" +
-                            TARGET_DIR +
-                            "/busybox"
-                    );
-
-                    return;
-                }
-
-                /*
-                 * 安装默认 ELF。
-                 */
-                for (String script :
-                        DEFAULT_SCRIPTS) {
-
-                    boolean ok =
-                            installAssetAsRoot(
-                                    script,
-                                    TARGET_DIR +
-                                            "/" +
-                                            script
-                            );
-
-                    if (!ok) {
-
-                        showError(
-                                "脚本安装失败：\n" +
-                                script +
-                                "\n\n" +
-                                "请确认该文件确实位于 " +
-                                "app/src/main/assets/"
-                        );
-
-                        return;
-                    }
-                }
-
-                /*
-                 * 设置权限。
-                 */
-                executeSuCommand(
-                        "chmod 755 " +
-                        shellQuote(
-                                TARGET_DIR +
-                                "/busybox"
-                        )
-                );
-
-                executeSuCommand(
-                        "chmod 755 " +
-                        shellQuote(
-                                TARGET_DIR
-                        ) +
-                        "/*.sh"
-                );
-
-                /*
-                 * 创建 DNS 文件。
-                 */
-                String resolvPath =
-                        TARGET_DIR +
-                                "/resolv.conf";
-
-                String dnsCommand =
-                        "printf '%s\\n' " +
-                        "'nameserver 114.114.114.114' " +
-                        "'nameserver 8.8.8.8' > " +
-                        shellQuote(resolvPath) +
-                        " && chmod 644 " +
-                        shellQuote(resolvPath);
-
-                executeSuCommand(dnsCommand);
-
-                /*
-                 * 最终验证。
-                 */
-                String verifyCommand =
-                        "echo '=== ENV CHECK ==='; " +
-
-                        "ls -l " +
-                        shellQuote(TARGET_DIR) +
-                        "; " +
-
-                        shellQuote(
-                                TARGET_DIR +
-                                "/busybox"
-                        ) +
-                        " --list | " +
-                        "grep '^script$'";
-
-                String verifyOutput =
-                        executeSuCommandGetOutput(
-                                verifyCommand
-                        );
-
-                mainHandler.post(() -> {
-
-                    appendOutput(
-                            "\n环境初始化完成。\n",
-                            "#00FF00"
-                    );
-
-                    appendOutput(
-                            verifyOutput,
-                            "#00FF00"
-                    );
-
-                    refreshScriptList();
-                });
-
-            } catch (Exception e) {
-
-                showError(
-                        "环境初始化异常：\n" +
-                        e.getMessage()
-                );
+                return;
             }
+
+            runElfReal(scriptPath);
 
         }).start();
     }
 
+
     // ============================================================
-    // Asset 安装
+    // 真正启动 ELF
     // ============================================================
 
-    private boolean installAssetAsRoot(
-            String assetName,
-            String destPath) {
+    private void runElfReal(String scriptPath) {
 
-        File tempFile =
-                new File(
-                        getFilesDir(),
-                        "asset_" +
-                        System.currentTimeMillis() +
-                        "_" +
-                        assetName
-                );
+        /*
+         * 如果之前还有旧进程，先清理状态。
+         */
+        stopCurrentElf();
 
         try {
 
+            File elf =
+                    new File(scriptPath);
+
+            if (!elf.exists() || !elf.isFile()) {
+
+                appendText(
+                        "ELF 文件不存在\n"
+                );
+
+                return;
+            }
+
+
+            // ====================================================
+            // 准备 BusyBox
+            // ====================================================
+
+            if (!extractAndPrepareBusybox()) {
+
+                appendText(
+                        "BusyBox 初始化失败\n"
+                );
+
+                return;
+            }
+
+
+            String suCmd =
+                    findSu();
+
+
+            // ====================================================
+            // ELF 所在目录
+            // ====================================================
+
+            String elfDir =
+                    elf.getParent();
+
+            if (elfDir == null) {
+
+                elfDir =
+                        getFilesDir()
+                                .getAbsolutePath();
+            }
+
+
+            // ====================================================
+            // 设置运行环境
+            // ====================================================
+
+            String env =
+
+                    "export PATH="
+                            + shellQuote(
+                                    busyboxFile.getParent()
+                                            + ":/system/bin"
+                                            + ":/system/xbin"
+                                            + ":/vendor/bin"
+                            )
+                            + ":$PATH; "
+
+                            + "export HOME=/data/local/tmp; "
+
+                            + "export TMPDIR=/data/local/tmp; "
+
+                            + "export LD_LIBRARY_PATH="
+                            + "/system/lib64"
+                            + ":/vendor/lib64"
+                            + ":$LD_LIBRARY_PATH; "
+
+                            + "cd "
+                            + shellQuote(elfDir)
+                            + "; ";
+
+
+            // ====================================================
+            // ELF 命令
+            // ====================================================
+
+            String elfCommand =
+                    "exec "
+                            + shellQuote(
+                                    elf.getAbsolutePath()
+                            );
+
+
+            // ====================================================
+            // BusyBox script 创建 PTY
+            // ====================================================
+
+            String command =
+
+                    env
+
+                            + shellQuote(
+                                    busyboxFile
+                                            .getAbsolutePath()
+                            )
+
+                            + " script -q -c "
+
+                            + shellQuote(
+                                    elfCommand
+                            )
+
+                            + " /dev/null";
+
+
+            // ====================================================
+            // 创建 root 进程
+            // ====================================================
+
+            ProcessBuilder pb =
+                    new ProcessBuilder(
+                            suCmd,
+                            "-c",
+                            command
+                    );
+
             /*
-             * Asset → App 私有目录
+             * stdout / stderr 分开。
              */
+            pb.redirectErrorStream(false);
+
+            try {
+
+                pb.directory(
+                        new File(elfDir)
+                );
+
+            } catch (Exception ignored) {
+            }
+
+
+            process =
+                    pb.start();
+
+            final Process currentProcess =
+                    process;
+
+
+            // ====================================================
+            // stdin
+            // ====================================================
+
+            writer =
+                    new BufferedWriter(
+                            new OutputStreamWriter(
+                                    currentProcess
+                                            .getOutputStream(),
+                                    StandardCharsets.UTF_8
+                            )
+                    );
+
+            /*
+             * 只有 stdin 成功建立以后，
+             * 才认为 ELF 真正进入运行状态。
+             */
+            elfRunning = true;
+
+
+            // ====================================================
+            // stdout
+            // ====================================================
+
+            Thread stdoutThread =
+                    new Thread(() -> {
+
+                        try {
+
+                            InputStreamReader reader =
+                                    new InputStreamReader(
+                                            currentProcess
+                                                    .getInputStream(),
+                                            StandardCharsets.UTF_8
+                                    );
+
+                            char[] buffer =
+                                    new char[1024];
+
+                            int count;
+
+                            while ((count =
+                                    reader.read(buffer))
+                                    != -1) {
+
+                                if (count <= 0) {
+                                    continue;
+                                }
+
+                                String raw =
+                                        new String(
+                                                buffer,
+                                                0,
+                                                count
+                                        );
+
+                                String clean =
+                                        cleanElfOutput(raw);
+
+                                if (clean.length() > 0) {
+
+                                    runOnUiThread(() ->
+                                            appendText(clean)
+                                    );
+                                }
+                            }
+
+                        } catch (Exception ignored) {
+                        }
+                    });
+
+            stdoutThread.setName(
+                    "ELF-stdout"
+            );
+
+
+            // ====================================================
+            // stderr
+            // ====================================================
+
+            Thread stderrThread =
+                    new Thread(() -> {
+
+                        try {
+
+                            InputStreamReader reader =
+                                    new InputStreamReader(
+                                            currentProcess
+                                                    .getErrorStream(),
+                                            StandardCharsets.UTF_8
+                                    );
+
+                            char[] buffer =
+                                    new char[1024];
+
+                            int count;
+
+                            while ((count =
+                                    reader.read(buffer))
+                                    != -1) {
+
+                                if (count <= 0) {
+                                    continue;
+                                }
+
+                                String raw =
+                                        new String(
+                                                buffer,
+                                                0,
+                                                count
+                                        );
+
+                                String clean =
+                                        cleanElfOutput(raw);
+
+                                if (clean.length() > 0) {
+
+                                    runOnUiThread(() ->
+                                            appendText(clean)
+                                    );
+                                }
+                            }
+
+                        } catch (Exception ignored) {
+                        }
+                    });
+
+            stderrThread.setName(
+                    "ELF-stderr"
+            );
+
+
+            stdoutThread.start();
+
+            stderrThread.start();
+
+
+            // ====================================================
+            // 等待进程结束
+            // ====================================================
+
+            new Thread(() -> {
+
+                try {
+
+                    int exitCode =
+                            currentProcess.waitFor();
+
+                    stdoutThread.join(1000);
+
+                    stderrThread.join(1000);
+
+                } catch (Exception ignored) {
+
+                } finally {
+
+                    /*
+                     * 只有当前 process 还是这个进程时，
+                     * 才清理状态。
+                     */
+                    if (process == currentProcess) {
+
+                        writer = null;
+                        process = null;
+                        elfRunning = false;
+                    }
+                }
+
+            }).start();
+
+        } catch (Exception e) {
+
+            writer = null;
+            process = null;
+            elfRunning = false;
+
+            appendText(
+                    "启动 ELF 失败\n"
+            );
+        }
+    }
+
+
+    // ============================================================
+    // 停止当前 ELF
+    // ============================================================
+
+    private void stopCurrentElf() {
+
+        try {
+
+            BufferedWriter currentWriter =
+                    writer;
+
+            if (currentWriter != null) {
+                currentWriter.close();
+            }
+
+        } catch (Exception ignored) {
+        }
+
+        writer = null;
+
+        try {
+
+            Process currentProcess =
+                    process;
+
+            if (currentProcess != null) {
+
+                currentProcess.destroy();
+            }
+
+        } catch (Exception ignored) {
+        }
+
+        process = null;
+
+        elfRunning = false;
+    }
+
+
+    // ============================================================
+    // 准备 BusyBox
+    // ============================================================
+
+    private boolean extractAndPrepareBusybox() {
+
+        try {
+
+            File tempFile =
+                    new File(
+                            getFilesDir(),
+                            "busybox_temp"
+                    );
+
+
+            // ====================================================
+            // 从 assets 提取 BusyBox
+            // ====================================================
+
             try (
                     InputStream is =
-                            getAssets()
-                                    .open(assetName);
+                            getAssets().open("busybox");
 
-                    OutputStream os =
+                    FileOutputStream fos =
                             new FileOutputStream(
                                     tempFile
                             )
@@ -643,821 +965,176 @@ public class MainActivity extends AppCompatActivity {
                 int len;
 
                 while ((len =
-                        is.read(buffer)) != -1) {
+                        is.read(buffer))
+                        > 0) {
 
-                    os.write(
+                    fos.write(
                             buffer,
                             0,
                             len
                     );
                 }
-
-                os.flush();
             }
 
-            if (!tempFile.exists() ||
-                    tempFile.length() == 0) {
+
+            if (!tempFile.exists()
+                    || tempFile.length() < 100000) {
 
                 return false;
             }
 
-            /*
-             * App 私有目录
-             *       ↓
-             * su
-             *       ↓
-             * /data/local/tmp
-             */
-            String command =
-                    "mkdir -p " +
-                    shellQuote(TARGET_DIR) +
-                    " && " +
 
-                    "cat " +
+            // ====================================================
+            // 安装到 /data/local/tmp
+            // ====================================================
+
+            busyboxFile =
+                    new File(
+                            "/data/local/tmp/busybox"
+                    );
+
+            String src =
                     shellQuote(
-                            tempFile.getAbsolutePath()
-                    ) +
-                    " > " +
-                    shellQuote(destPath) +
-                    " && " +
+                            tempFile
+                                    .getAbsolutePath()
+                    );
 
-                    "chmod 755 " +
-                    shellQuote(destPath);
+            String dst =
+                    shellQuote(
+                            busyboxFile
+                                    .getAbsolutePath()
+                    );
 
-            Process process =
+            String installCommand =
+
+                    "rm -f "
+                            + dst
+                            + " ; "
+
+                            + "cat "
+                            + src
+                            + " > "
+                            + dst
+                            + " ; "
+
+                            + "chmod 755 "
+                            + dst;
+
+
+            Process installProcess =
                     new ProcessBuilder(
-                            "su",
+                            findSu(),
                             "-c",
-                            command
+                            installCommand
                     )
                             .redirectErrorStream(true)
                             .start();
 
-            String output =
-                    readAll(
-                            process.getInputStream()
-                    );
+            int installExit =
+                    installProcess.waitFor();
 
-            int exitCode =
-                    process.waitFor();
-
-            /*
-             * 删除 App 私有临时文件。
-             */
-            //noinspection ResultOfMethodCallIgnored
-            tempFile.delete();
-
-            if (exitCode != 0) {
-
+            if (installExit != 0) {
                 return false;
             }
 
-            /*
-             * Root 侧验证。
-             */
-            String verify =
-                    executeSuCommandGetOutput(
-                            "test -f " +
-                            shellQuote(destPath) +
-                            " && " +
-                            "test -x " +
-                            shellQuote(destPath) +
-                            " && echo OK"
+
+            // ====================================================
+            // 检查文件
+            // ====================================================
+
+            if (!busyboxFile.exists()) {
+                return false;
+            }
+
+
+            // ====================================================
+            // 检查 BusyBox script applet
+            // ====================================================
+
+            String scriptCheckCommand =
+                    dst + " --list";
+
+            Process scriptCheckProcess =
+                    new ProcessBuilder(
+                            findSu(),
+                            "-c",
+                            scriptCheckCommand
+                    )
+                            .redirectErrorStream(true)
+                            .start();
+
+            String appletList =
+                    readAll(
+                            scriptCheckProcess
+                                    .getInputStream()
                     );
 
-            return verify.contains("OK");
+            int checkExit =
+                    scriptCheckProcess.waitFor();
+
+            if (checkExit != 0) {
+                return false;
+            }
+
+
+            boolean hasScript = false;
+
+            for (String applet :
+                    appletList.split("\\s+")) {
+
+                if ("script".equals(
+                        applet.trim()
+                )) {
+
+                    hasScript = true;
+
+                    break;
+                }
+            }
+
+            return hasScript;
 
         } catch (Exception e) {
-
-            e.printStackTrace();
-
-            //noinspection ResultOfMethodCallIgnored
-            tempFile.delete();
 
             return false;
         }
     }
 
-    // ============================================================
-    // Root 命令
-    // ============================================================
-
-    private boolean executeSuCommand(
-            String cmd) {
-
-        Process process = null;
-
-        try {
-
-            process =
-                    new ProcessBuilder(
-                            "su",
-                            "-c",
-                            cmd
-                    )
-                            .redirectErrorStream(true)
-                            .start();
-
-            readAll(
-                    process.getInputStream()
-            );
-
-            int exitCode =
-                    process.waitFor();
-
-            return exitCode == 0;
-
-        } catch (Exception e) {
-
-            return false;
-
-        } finally {
-
-            if (process != null) {
-                process.destroy();
-            }
-        }
-    }
-
-    private String executeSuCommandGetOutput(
-            String cmd) {
-
-        Process process = null;
-
-        try {
-
-            process =
-                    new ProcessBuilder(
-                            "su",
-                            "-c",
-                            cmd
-                    )
-                            .redirectErrorStream(true)
-                            .start();
-
-            String output =
-                    readAll(
-                            process.getInputStream()
-                    );
-
-            process.waitFor();
-
-            return output;
-
-        } catch (Exception e) {
-
-            return "命令执行失败: " +
-                    e.getMessage() +
-                    "\n";
-
-        } finally {
-
-            if (process != null) {
-                process.destroy();
-            }
-        }
-    }
 
     // ============================================================
-    // 刷新脚本列表
-    // ============================================================
-
-    private void refreshScriptList() {
-
-        if (adapter == null) {
-            return;
-        }
-
-        scriptList.clear();
-
-        for (String script :
-                DEFAULT_SCRIPTS) {
-
-            String path =
-                    TARGET_DIR +
-                            "/" +
-                            script;
-
-            String result =
-                    executeSuCommandGetOutput(
-                            "test -f " +
-                            shellQuote(path) +
-                            " && " +
-                            "test -x " +
-                            shellQuote(path) +
-                            " && echo EXISTS"
-                    );
-
-            if (result.contains("EXISTS")) {
-
-                scriptList.add(script);
-            }
-        }
-
-        mainHandler.post(() ->
-                adapter.notifyDataSetChanged()
-        );
-    }
-
-    // ============================================================
-    // 按钮
-    // ============================================================
-
-    private void initListeners() {
-
-        btnAdd.setOnClickListener(v -> {
-
-            Toast.makeText(
-                    this,
-                    "默认脚本通过 assets 自动部署。",
-                    Toast.LENGTH_LONG
-            ).show();
-        });
-
-        btnSend.setOnClickListener(v -> {
-
-            String cmd =
-                    etInput.getText()
-                            .toString()
-                            .trim();
-
-            if (TextUtils.isEmpty(cmd)) {
-                return;
-            }
-
-            etInput.setText("");
-
-            /*
-             * ELF 正在运行：
-             * 把输入发送给 ELF。
-             */
-            if (currentProcess != null) {
-
-                sendInputToProcess(cmd);
-
-            } else {
-
-                /*
-                 * 没有 ELF 运行：
-                 * 执行 Root 命令。
-                 */
-                executeCommand(cmd);
-            }
-        });
-    }
-
-    // ============================================================
-    // 普通 Root 命令
-    // ============================================================
-
-    private void executeCommand(
-            String cmd) {
-
-        appendOutput(
-                "$ " + cmd + "\n",
-                "#00FFFF"
-        );
-
-        new Thread(() -> {
-
-            String fullCmd =
-                    "export PATH=" +
-                    shellQuote(TARGET_DIR) +
-                    ":/system/bin:/system/xbin:/vendor/bin:$PATH; " +
-
-                    "export HOME=" +
-                    shellQuote(TARGET_DIR) +
-                    "; " +
-
-                    "export TMPDIR=" +
-                    shellQuote(TARGET_DIR) +
-                    "; " +
-
-                    "export RESOLV_CONF=" +
-                    shellQuote(
-                            TARGET_DIR +
-                            "/resolv.conf"
-                    ) +
-                    "; " +
-
-                    "cd " +
-                    shellQuote(TARGET_DIR) +
-                    "; " +
-
-                    cmd;
-
-            executeSuCommandStream(
-                    fullCmd
-            );
-
-        }).start();
-    }
-
-    // ============================================================
-    // ELF 运行
-    // ============================================================
-
-    private void runElfReal(
-            String scriptPath) {
-
-        new Thread(() -> {
-
-            try {
-
-                /*
-                 * 检查 ELF。
-                 */
-                if (!rootFileExists(
-                        scriptPath)) {
-
-                    showError(
-                            "脚本不存在或不可执行：\n" +
-                            scriptPath
-                    );
-
-                    return;
-                }
-
-                /*
-                 * 检查 BusyBox。
-                 */
-                String busybox =
-                        TARGET_DIR +
-                                "/busybox";
-
-                if (!rootFileExists(
-                        busybox)) {
-
-                    showError(
-                            "BusyBox 不存在：\n" +
-                            busybox
-                    );
-
-                    return;
-                }
-
-                /*
-                 * 检查 script applet。
-                 */
-                String applet =
-                        executeSuCommandGetOutput(
-                                shellQuote(busybox) +
-                                " --list | " +
-                                "grep '^script$'"
-                        );
-
-                if (!applet.contains(
-                        "script")) {
-
-                    showError(
-                            "BusyBox 没有 script applet。\n\n" +
-                            "Kairos 需要 PTY 才能正常交互。"
-                    );
-
-                    return;
-                }
-
-                String scriptName =
-                        new File(scriptPath)
-                                .getName();
-
-                mainHandler.post(() ->
-                        appendOutput(
-                                "\n--- 开始运行: " +
-                                scriptName +
-                                " ---\n",
-                                "#00FF00"
-                        )
-                );
-
-                /*
-                 * 环境变量。
-                 */
-                String envCmd =
-                        "export PATH=" +
-                        shellQuote(TARGET_DIR) +
-                        ":/system/bin:/system/xbin:/vendor/bin:$PATH; " +
-
-                        "export HOME=" +
-                        shellQuote(TARGET_DIR) +
-                        "; " +
-
-                        "export TMPDIR=" +
-                        shellQuote(TARGET_DIR) +
-                        "; " +
-
-                        "export RESOLV_CONF=" +
-                        shellQuote(
-                                TARGET_DIR +
-                                "/resolv.conf"
-                        ) +
-                        "; " +
-
-                        "export LD_LIBRARY_PATH=/system/lib64:/vendor/lib64:$LD_LIBRARY_PATH; " +
-
-                        "cd " +
-                        shellQuote(TARGET_DIR) +
-                        "; ";
-
-                /*
-                 * 关键：
-                 *
-                 * BusyBox script
-                 *      ↓
-                 * PTY
-                 *      ↓
-                 * exec ELF
-                 */
-                String command =
-                        envCmd +
-
-                        shellQuote(busybox) +
-
-                        " script -q -c " +
-
-                        shellQuote(
-                                "exec " +
-                                shellQuote(scriptPath)
-                        ) +
-
-                        " /dev/null";
-
-                ProcessBuilder pb =
-                        new ProcessBuilder(
-                                "su",
-                                "-c",
-                                command
-                        );
-
-                /*
-                 * Java Process 环境。
-                 */
-                pb.environment().put(
-                        "PATH",
-                        TARGET_DIR +
-                        ":/system/bin:/system/xbin:/vendor/bin:" +
-                        System.getenv("PATH")
-                );
-
-                pb.environment().put(
-                        "HOME",
-                        TARGET_DIR
-                );
-
-                pb.environment().put(
-                        "TMPDIR",
-                        TARGET_DIR
-                );
-
-                pb.environment().put(
-                        "RESOLV_CONF",
-                        TARGET_DIR +
-                        "/resolv.conf"
-                );
-
-                pb.environment().put(
-                        "LD_LIBRARY_PATH",
-                        "/system/lib64:/vendor/lib64:" +
-                        System.getenv(
-                                "LD_LIBRARY_PATH"
-                        )
-                );
-
-                pb.redirectErrorStream(true);
-
-                currentProcess =
-                        pb.start();
-
-                /*
-                 * 不使用 readLine()。
-                 *
-                 * Kairos 的：
-                 *
-                 * 请输入选择(1或2) ->
-                 *
-                 * 可能没有换行。
-                 */
-                InputStream input =
-                        currentProcess
-                                .getInputStream();
-
-                byte[] buffer =
-                        new byte[2048];
-
-                int count;
-
-                while ((count =
-                        input.read(buffer)) != -1) {
-
-                    if (count <= 0) {
-                        continue;
-                    }
-
-                    String raw =
-                            new String(
-                                    buffer,
-                                    0,
-                                    count
-                            );
-
-                    String cleaned =
-                            cleanElfOutput(raw);
-
-                    if (!TextUtils.isEmpty(
-                            cleaned)) {
-
-                        final String output =
-                                cleaned;
-
-                        mainHandler.post(() ->
-                                appendOutput(
-                                        output,
-                                        "#00FF00"
-                                )
-                        );
-                    }
-                }
-
-                int exitCode =
-                        currentProcess.waitFor();
-
-                currentProcess = null;
-
-                mainHandler.post(() ->
-                        appendOutput(
-                                "\n--- 脚本执行结束，退出码: " +
-                                exitCode +
-                                " ---\n",
-                                "#FFCC00"
-                        )
-                );
-
-            } catch (Exception e) {
-
-                currentProcess = null;
-
-                mainHandler.post(() ->
-                        appendOutput(
-                                "执行出错: " +
-                                e.getMessage() +
-                                "\n",
-                                "#FF0000"
-                        )
-                );
-            }
-        }).start();
-    }
-
-    // ============================================================
-    // 给 ELF 输入
-    // ============================================================
-
-    private void sendInputToProcess(
-            String input) {
-
-        try {
-
-            OutputStream output =
-                    currentProcess
-                            .getOutputStream();
-
-            output.write(
-                    (input + "\n")
-                            .getBytes()
-            );
-
-            output.flush();
-
-        } catch (Exception e) {
-
-            appendOutput(
-                    "输入失败: " +
-                    e.getMessage() +
-                    "\n",
-                    "#FF0000"
-            );
-        }
-    }
-
-    // ============================================================
-    // 文件检查
-    // ============================================================
-
-    private boolean rootFileExists(
-            String path) {
-
-        String result =
-                executeSuCommandGetOutput(
-                        "test -f " +
-                        shellQuote(path) +
-                        " && " +
-                        "test -x " +
-                        shellQuote(path) +
-                        " && echo OK"
-                );
-
-        return result.contains("OK");
-    }
-
-    // ============================================================
-    // Root 流式输出
-    // ============================================================
-
-    private void executeSuCommandStream(
-            String cmd) {
-
-        try {
-
-            Process process =
-                    new ProcessBuilder(
-                            "su",
-                            "-c",
-                            cmd
-                    )
-                            .redirectErrorStream(true)
-                            .start();
-
-            InputStream input =
-                    process.getInputStream();
-
-            byte[] buffer =
-                    new byte[2048];
-
-            int count;
-
-            while ((count =
-                    input.read(buffer)) != -1) {
-
-                if (count <= 0) {
-                    continue;
-                }
-
-                String output =
-                        new String(
-                                buffer,
-                                0,
-                                count
-                        );
-
-                final String finalOutput =
-                        output;
-
-                mainHandler.post(() ->
-                        appendOutput(
-                                finalOutput,
-                                "#00FFFF"
-                        )
-                );
-            }
-
-            process.waitFor();
-
-        } catch (Exception e) {
-
-            mainHandler.post(() ->
-                    appendOutput(
-                            "错误: " +
-                            e.getMessage() +
-                            "\n",
-                            "#FF0000"
-                    )
-            );
-        }
-    }
-
-    // ============================================================
-    // 清理 ANSI
-    // ============================================================
-
-    private String cleanElfOutput(
-            String text) {
-
-        if (text == null) {
-            return "";
-        }
-
-        /*
-         * ANSI CSI。
-         */
-        text = text.replaceAll(
-                "\u001B\\[[0-9;?]*[ -/]*[@-~]",
-                ""
-        );
-
-        /*
-         * ANSI OSC。
-         */
-        text = text.replaceAll(
-                "\u001B\\][^\u0007]*(?:\u0007|\u001B\\\\)",
-                ""
-        );
-
-        /*
-         * 颜色标记。
-         */
-        text = text.replaceAll(
-                "\\[(?:[0-9;?]+)m",
-                ""
-        );
-
-        /*
-         * 隐藏指定文本。
-         */
-        text = text.replace(
-                "公益倒卖死全家",
-                ""
-        );
-
-        return text;
-    }
-
-    // ============================================================
-    // UI 输出
-    // ============================================================
-
-    private void appendOutput(
-            String text,
-            String colorHex) {
-
-        mainHandler.post(() -> {
-
-            if (tvOutput == null) {
-                return;
-            }
-
-            tvOutput.append(text);
-
-            if (scrollView != null) {
-
-                scrollView.post(() ->
-                        scrollView.fullScroll(
-                                View.FOCUS_DOWN
-                        )
-                );
-            }
-        });
-    }
-
-    private void showError(
-            String message) {
-
-        mainHandler.post(() ->
-                appendOutput(
-                        "\n[错误]\n" +
-                        message +
-                        "\n",
-                        "#FF0000"
-                )
-        );
-    }
-
-    // ============================================================
-    // Shell 转义
-    // ============================================================
-
-    private String shellQuote(
-            String value) {
-
-        if (value == null) {
-            return "''";
-        }
-
-        return "'" +
-                value.replace(
-                        "'",
-                        "'\\''"
-                ) +
-                "'";
-    }
-
-    // ============================================================
-    // 读取全部
+    // 读取 InputStream
     // ============================================================
 
     private String readAll(
-            InputStream inputStream) {
+            InputStream inputStream
+    ) {
 
         StringBuilder result =
                 new StringBuilder();
 
         try {
 
-            byte[] buffer =
-                    new byte[4096];
+            InputStreamReader reader =
+                    new InputStreamReader(
+                            inputStream,
+                            StandardCharsets.UTF_8
+                    );
 
-            int len;
+            char[] buffer =
+                    new char[1024];
 
-            while ((len =
-                    inputStream.read(buffer)) != -1) {
+            int count;
 
-                if (len > 0) {
+            while ((count =
+                    reader.read(buffer))
+                    != -1) {
+
+                if (count > 0) {
 
                     result.append(
-                            new String(
-                                    buffer,
-                                    0,
-                                    len
-                            )
+                            buffer,
+                            0,
+                            count
                     );
                 }
             }
@@ -1468,42 +1145,185 @@ public class MainActivity extends AppCompatActivity {
         return result.toString();
     }
 
+
     // ============================================================
-    // Adapter
+    // 清理 ELF 输出
+    // ============================================================
+
+    private String cleanElfOutput(
+            String text
+    ) {
+
+        if (text == null
+                || text.length() == 0) {
+
+            return "";
+        }
+
+
+        // ========================================================
+        // 删除真正的 ANSI ESC 序列
+        //
+        // ESC[1;32m
+        // ESC[0m
+        // ESC[33m
+        // ========================================================
+
+        text =
+                text.replaceAll(
+                        "\u001B\\[[0-9;?]*[ -/]*[@-~]",
+                        ""
+                );
+
+
+        // ========================================================
+        // 删除已经变成普通文本的 ANSI
+        //
+        // [1;32m
+        // [0m
+        // [33m
+        // ========================================================
+
+        text =
+                text.replaceAll(
+                        "\\[(?:[0-9;?]+)m",
+                        ""
+                );
+
+
+        // ========================================================
+        // 删除指定文字
+        // ========================================================
+
+        text =
+                text.replace(
+                        "公益倒卖死全家",
+                        ""
+                );
+
+
+        return text;
+    }
+
+
+    // ============================================================
+    // 获取文件名
+    // ============================================================
+
+    private String getFileName(Uri uri) {
+
+        String result = null;
+
+        if ("content".equals(
+                uri.getScheme()
+        )) {
+
+            try (
+                    Cursor cursor =
+                            getContentResolver()
+                                    .query(
+                                            uri,
+                                            null,
+                                            null,
+                                            null,
+                                            null
+                                    )
+            ) {
+
+                if (cursor != null
+                        && cursor.moveToFirst()) {
+
+                    int nameIndex =
+                            cursor.getColumnIndex(
+                                    OpenableColumns
+                                            .DISPLAY_NAME
+                            );
+
+                    if (nameIndex != -1) {
+
+                        result =
+                                cursor.getString(
+                                        nameIndex
+                                );
+                    }
+                }
+
+            } catch (Exception ignored) {
+            }
+        }
+
+
+        if (result == null) {
+
+            result =
+                    uri.getPath();
+
+            if (result != null) {
+
+                int cut =
+                        result.lastIndexOf('/');
+
+                if (cut != -1) {
+
+                    result =
+                            result.substring(
+                                    cut + 1
+                            );
+                }
+            }
+        }
+
+        return result;
+    }
+
+
+    // ============================================================
+    // 保存脚本列表
+    // ============================================================
+
+    private void saveScripts() {
+
+        prefs.edit()
+                .putStringSet(
+                        "scripts",
+                        new HashSet<>(
+                                scriptList
+                        )
+                )
+                .apply();
+    }
+
+
+    // ============================================================
+    // ELF 列表 Adapter
     // ============================================================
 
     private class ScriptAdapter
             extends ArrayAdapter<String> {
 
-        private final Context context;
-        private final List<String> items;
-
-        public ScriptAdapter(
-                Context context,
-                List<String> items) {
+        public ScriptAdapter() {
 
             super(
-                    context,
-                    R.layout.item_script,
-                    items
+                    MainActivity.this,
+                    0,
+                    scriptList
             );
-
-            this.context = context;
-            this.items = items;
         }
+
 
         @NonNull
         @Override
         public View getView(
                 int position,
                 View convertView,
-                @NonNull ViewGroup parent) {
+                @NonNull ViewGroup parent
+        ) {
 
             if (convertView == null) {
 
                 convertView =
                         LayoutInflater
-                                .from(context)
+                                .from(getContext())
                                 .inflate(
                                         R.layout.item_script,
                                         parent,
@@ -1511,14 +1331,18 @@ public class MainActivity extends AppCompatActivity {
                                 );
             }
 
+
+            String path =
+                    scriptList.get(position);
+
+            String fileName =
+                    new File(path)
+                            .getName();
+
+
             TextView tvName =
                     convertView.findViewById(
                             R.id.tvScriptName
-                    );
-
-            Button btnDelete =
-                    convertView.findViewById(
-                            R.id.btnDelete
                     );
 
             Button btnRun =
@@ -1526,90 +1350,82 @@ public class MainActivity extends AppCompatActivity {
                             R.id.btnRun
                     );
 
-            String scriptName =
-                    items.get(position);
+            Button btnDelete =
+                    convertView.findViewById(
+                            R.id.btnDelete
+                    );
 
-            tvName.setText(scriptName);
 
-            /*
-             * 删除。
-             */
+            tvName.setText(fileName);
+
+
+            // ====================================================
+            // 运行
+            // ====================================================
+
+            btnRun.setOnClickListener(
+                    v -> runElf(path)
+            );
+
+
+            // ====================================================
+            // 删除
+            // ====================================================
+
             btnDelete.setOnClickListener(v -> {
 
-                new Thread(() -> {
+                scriptList.remove(position);
 
-                    String path =
-                            TARGET_DIR +
-                            "/" +
-                            scriptName;
+                adapter.notifyDataSetChanged();
 
-                    boolean ok =
-                            executeSuCommand(
-                                    "rm -f " +
-                                    shellQuote(path)
-                            );
-
-                    mainHandler.post(() -> {
-
-                        if (position >= 0 &&
-                                position < items.size()) {
-
-                            items.remove(position);
-
-                            notifyDataSetChanged();
-                        }
-
-                        appendOutput(
-                                ok
-                                        ? "已删除: " +
-                                          scriptName +
-                                          "\n"
-                                        : "删除失败: " +
-                                          scriptName +
-                                          "\n",
-                                "#FFCC00"
-                        );
-                    });
-
-                }).start();
+                saveScripts();
             });
 
-            /*
-             * 运行 ELF。
-             */
-            btnRun.setOnClickListener(v -> {
-
-                String path =
-                        TARGET_DIR +
-                        "/" +
-                        scriptName;
-
-                runElfReal(path);
-            });
 
             return convertView;
         }
     }
 
+
     // ============================================================
-    // 生命周期
+    // 添加输出到界面
+    // ============================================================
+
+    private void appendText(String text) {
+
+        if (text == null
+                || text.length() == 0) {
+
+            return;
+        }
+
+        runOnUiThread(() -> {
+
+            tvOutput.append(text);
+
+            scrollView.post(() ->
+                    scrollView.fullScroll(
+                            View.FOCUS_DOWN
+                    )
+            );
+        });
+    }
+
+
+    // ============================================================
+    // Activity 销毁
     // ============================================================
 
     @Override
     protected void onDestroy() {
 
+        /*
+         * 先停止 ELF。
+         */
+        stopCurrentElf();
+
         super.onDestroy();
-
-        try {
-
-            if (currentProcess != null) {
-
-                currentProcess.destroy();
-            }
-
-        } catch (Exception ignored) {
-        }
-
-        currentProcess = null;
     }
 }
+
+
