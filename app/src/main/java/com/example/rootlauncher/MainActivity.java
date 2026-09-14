@@ -1,4 +1,3 @@
-
 package com.example.rootlauncher;
 
 import android.app.AlertDialog;
@@ -235,21 +234,16 @@ public class MainActivity extends AppCompatActivity {
         if (btnAdd != null) {
             btnAdd.setOnClickListener(v -> filePicker.launch(new String[]{"*/*"}));
         }
-        // 如果 XML 里有额外的按钮，加上响应
-        Button btnStop = findViewByIdSafe(R.id.btnStop);
-        if (btnStop != null) btnStop.setOnClickListener(v -> stopCurrentProcess());
-        Button btnClear = findViewByIdSafe(R.id.btnClear);
-        if (btnClear != null) btnClear.setOnClickListener(v -> tvOutput.setText(""));
+        // 去掉了不存在的 btnStop 和 btnClear，防止编译报错
     }
 
     private void setupInput() {
         if (etInput == null) return;
 
         etInput.setOnEditorActionListener((v, actionId, event) -> {
-            // ★★★ 修复：IME_ACTION_RUN 改为有效的 IME_ACTION_SEND ★★★
             boolean enter = actionId == EditorInfo.IME_ACTION_GO ||
                     actionId == EditorInfo.IME_ACTION_DONE ||
-                    actionId == EditorInfo.IME_ACTION_SEND;
+                    actionId == EditorInfo.IME_ACTION_SEND; // 修正为有效的常量
 
             if (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
                     && event.getAction() == KeyEvent.ACTION_DOWN) {
@@ -434,10 +428,6 @@ public class MainActivity extends AppCompatActivity {
             try { Thread.sleep(150); } catch (InterruptedException ignored) {}
             if (process.isAlive()) process.destroyForcibly();
         }
-    }
-
-    private void stopCurrentProcess() {
-        executor.execute(this::stopCurrentProcessInternal);
     }
 
     // ============================================================
