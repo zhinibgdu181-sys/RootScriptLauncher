@@ -59,8 +59,10 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String BUILTIN_KAIROS = "Kairos_Driver_Loader_Release_90f76e9.sh";
     private static final String BUILTIN_TIME = "TIME_Cloud_Loader_Release_1732727.sh";
+    private static final String BUSYBOX_ASSET = "busybox";
 
     private static final String RUNTIME_DIR = "/data/local/tmp/com.example.rootlauncher/files";
+    private static final String RUNTIME_BUSYBOX = RUNTIME_DIR + "/busybox";
 
     private final ActivityResultLauncher<Intent> filePickerLauncher =
             registerForActivityResult(
@@ -416,7 +418,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // ★ 核心修改：直接执行 ELF，不再套用 busybox script
+    // ★ 核心修改：重写 runElfReal，完美支持 PTY 交互
     // ============================================================
     private void runElfReal(String scriptPath) {
         stopCurrentElf();
@@ -455,13 +457,11 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // 检查文件头，确认是 ELF (7f 45 4c 46) 还是脚本
-            appendText("[ELF] 正在检查文件类型...\n");
-            String headerCheckCmd = "head -c 4 " + shellQuote(runtimePath) + " | od -An -tx1";
-            Process headerProcess = new ProcessBuilder(findSu(), "-c", headerCheckCmd).redirectErrorStream(true).start();
-            String headerOutput = readAll(headerProcess.getInputStream()).trim();
-            headerProcess.waitFor();
-            appendText("[ELF] 文件头: " + headerOutput + "\n");
+            // 确保 BusyBox 准备好
+            if (!extractAndPrepareBusybox()) {
+                appendText("[ELF] APK 内置 BusyBox 初始化失败\n");
+                return;
+            }
 
             String suCmd = findSu();
             String elfDir = elf.getParent();
@@ -473,14 +473,17 @@ public class MainActivity extends AppCompatActivity {
                     "export LD_LIBRARY_PATH=" + shellQuote("/system/lib64:/vendor/lib64") + ":$LD_LIBRARY_PATH; " +
                     "cd " + shellQuote(elfDir) + "; ";
 
-            // ★ 直接执行 ELF，绝不套用 busybox script
+            // 用 exec 直接执行 ELF
             String elfCommand = "exec " + shellQuote(elf.getAbsolutePath());
-            String command = env + elfCommand;
+
+            // ★ 核心：用 busybox script 包裹，分配 PTY 伪终端，确保能交互
+            // 注意：busybox script 的 -c 参数接受一个要执行的命令
+            String command = env + shellQuote(RUNTIME_BUSYBOX) + " script -q -c " + shellQuote(elfCommand) + " /dev/null";
 
             appendText("[执行命令]\n" + command + "\n");
 
             ProcessBuilder pb = new ProcessBuilder(suCmd, "-c", command);
-            // ★ 核心修复：将 stderr 重定向到 stdout，这样连不上 linker 的错误也能看到
+            // 重定向 stderr 到 stdout，以便捕获 linker 错误
             pb.redirectErrorStream(true);
             try {
                 pb.directory(new File(elfDir));
@@ -492,10 +495,9 @@ public class MainActivity extends AppCompatActivity {
             writer = new BufferedWriter(new OutputStreamWriter(currentProcess.getOutputStream(), StandardCharsets.UTF_8));
             elfRunning = true;
 
-            appendText("[+] ELF 已启动\n");
+            appendText("[+] ELF 已启动 (PTY)\n");
             appendText("[+] ELF：" + runtimePath + "\n");
 
-            // 由于 redirectErrorStream(true)，只需要读取一个流即可
             Thread stdoutThread = new Thread(() -> {
                 try {
                     InputStreamReader reader = new InputStreamReader(currentProcess.getInputStream(), StandardCharsets.UTF_8);
@@ -603,6 +605,71 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    private boolean extractAndPrepareBusybox() {
+        File tempFile = new File(getFilesDir(), "busybox_temp");
+        try {
+            InputStream is = getAssets().open(BUSYBOX_ASSET);
+            FileOutputStream fos = new FileOutputStream(tempFile);
+            byte[] buffer = new byte[8192];
+            int len;
+            while ((len = is.read(buffer)) > 0) {
+                fos.write(buffer, 0, len);
+            }
+            is.close();
+            fos.close();
+
+            if (!tempFile.exists() || tempFile.length() < 100000) {
+                appendText("[BusyBox] assets/busybox 文件异常\n");
+                return false;
+            }
+
+            if (!prepareRuntimeDir()) return false;
+
+            String destination = RUNTIME_BUSYBOX;
+            String src = shellQuote(tempFile.getAbsolutePath());
+            String dst = shellQuote(destination);
+
+            String installCommand = "cat " + src + " > " + dst + "; chmod 755 " + dst;
+            Process installProcess = new ProcessBuilder(findSu(), "-c", installCommand).redirectErrorStream(true).start();
+            String installOutput = readAll(installProcess.getInputStream());
+            int installExit = installProcess.waitFor();
+
+            if (installExit != 0) {
+                appendText("[BusyBox] 安装失败\n" + installOutput);
+                return false;
+            }
+
+            Process listProcess = new ProcessBuilder(findSu(), "-c", dst + " --list").redirectErrorStream(true).start();
+            String appletList = readAll(listProcess.getInputStream());
+            int listExit = listProcess.waitFor();
+
+            if (listExit != 0 || !hasBusyboxApplet(appletList, "script")) {
+                appendText("[BusyBox] 不包含 script applet 或读取失败\n");
+                return false;
+            }
+
+            appendText("[+] APK 内置 BusyBox 已准备\n");
+            return true;
+
+        } catch (Exception e) {
+            appendText("[BusyBox] 初始化异常：" + e.getMessage() + "\n");
+            return false;
+        } finally {
+            try {
+                if (tempFile.exists()) tempFile.delete();
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private boolean hasBusyboxApplet(String appletList, String wanted) {
+        if (appletList == null || wanted == null) return false;
+        String[] applets = appletList.split("\\s+");
+        for (String applet : applets) {
+            if (wanted.equals(applet.trim())) return true;
+        }
+        return false;
     }
 
     private String readAll(InputStream inputStream) {
@@ -739,4 +806,4 @@ public class MainActivity extends AppCompatActivity {
         stopCurrentElf();
         super.onDestroy();
     }
-        }
+}
