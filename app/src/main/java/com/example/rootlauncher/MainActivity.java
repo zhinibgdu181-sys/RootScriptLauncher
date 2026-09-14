@@ -1,79 +1,43 @@
 package com.example.rootlauncher;
 
-
 import android.app.Activity;
-
 import android.app.AlertDialog;
-
 import android.content.Intent;
-
 import android.database.Cursor;
-
 import android.graphics.Rect;
-
 import android.net.Uri;
-
 import android.os.Bundle;
-
 import android.provider.OpenableColumns;
-
 import android.view.LayoutInflater;
-
 import android.view.View;
-
 import android.view.ViewGroup;
-
 import android.view.WindowManager;
-
 import android.widget.ArrayAdapter;
-
 import android.widget.Button;
-
 import android.widget.EditText;
-
 import android.widget.ListView;
-
 import android.widget.ScrollView;
-
 import android.widget.TextView;
 
-
 import androidx.activity.result.ActivityResultLauncher;
-
 import androidx.activity.result.contract.ActivityResultContracts;
-
 import androidx.annotation.NonNull;
-
 import androidx.appcompat.app.AppCompatActivity;
-
 import androidx.constraintlayout.widget.ConstraintLayout;
 
-
 import java.io.BufferedReader;
-
 import java.io.BufferedWriter;
-
 import java.io.File;
-
 import java.io.FileOutputStream;
-
 import java.io.InputStream;
-
 import java.io.InputStreamReader;
-
 import java.io.OutputStreamWriter;
-
 import java.nio.charset.StandardCharsets;
-
 import java.util.ArrayList;
-
 import java.util.HashSet;
-
 import java.util.Set;
 
-
 public class MainActivity extends AppCompatActivity {
-
 
 private TextView tvOutput;  
 private EditText etInput;  
@@ -2585,12 +2549,8 @@ protected void onDestroy() {
     stopCurrentElf();  
 
     super.onDestroy();  
-}  
-
-
+}
 
 }
 
-
 这个是我写的一个apk 但是他没办法执行这个文件
-
