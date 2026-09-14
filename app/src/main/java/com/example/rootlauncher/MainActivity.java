@@ -193,21 +193,19 @@ public class MainActivity extends AppCompatActivity {
         if (btnAdd != null) {
             btnAdd.setOnClickListener(v -> filePicker.launch(new String[]{"*/*"}));
         }
-        // 这里只处理存在的 btnSend，绝不碰 btnStop / btnClear
+        // 这里绝对不碰不存在的 btnStop / btnClear
     }
 
     private void setupInput() {
         if (etInput == null) return;
 
         etInput.setOnEditorActionListener((v, actionId, event) -> {
-            boolean enter = actionId == EditorInfo.IME_ACTION_GO ||
-                    actionId == EditorInfo.IME_ACTION_DONE ||
-                    actionId == EditorInfo.IME_ACTION_SEND;
-
-            if (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
-                    && event.getAction() == KeyEvent.ACTION_DOWN) {
-                enter = true;
-            }
+            // 统一处理回车和发送键
+            boolean enter = (actionId == EditorInfo.IME_ACTION_DONE) ||
+                    (actionId == EditorInfo.IME_ACTION_SEND) ||
+                    (actionId == EditorInfo.IME_ACTION_GO) ||
+                    (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                            && event.getAction() == KeyEvent.ACTION_DOWN);
 
             if (enter) {
                 String text = etInput.getText().toString().trim();
