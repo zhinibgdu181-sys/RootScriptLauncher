@@ -76,7 +76,7 @@ public class MainActivity extends AppCompatActivity {
         // 2. 检查 Root 权限
         if (!checkRootPermission()) {
             showRootDialog();
-            return; 
+            return;
         }
 
         // 3. 有 Root 权限，正常初始化
@@ -85,8 +85,7 @@ public class MainActivity extends AppCompatActivity {
         initKeyboardListener();
         initListeners();
         
-        // ★★★ 将原来 0.55f 修改为 0.70f：列表占比70%，终端缩短 ★★★
-        updateListHeight(0.70f);
+        // 注意：这里去掉了强制 updateListHeight 的操作，完全交给 XML 的 0.70 固定比例，防止一变长就乱。
     }
 
     // ====================== Root 检测与弹窗模块 ======================
@@ -115,7 +114,6 @@ public class MainActivity extends AppCompatActivity {
                         initEnvironment();
                         initKeyboardListener();
                         initListeners();
-                        updateListHeight(0.70f);
                     } else {
                         Toast.makeText(MainActivity.this, "仍未获取 Root 权限！", Toast.LENGTH_SHORT).show();
                         showRootDialog();
@@ -214,9 +212,9 @@ public class MainActivity extends AppCompatActivity {
         scrollView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
             int heightDiff = scrollView.getRootView().getHeight() - scrollView.getHeight();
             if (heightDiff > 500) {
-                updateListHeight(0.15f); // 键盘弹起时列表高度
+                updateListHeight(0.15f); // 键盘弹起时列表变短，腾出空间给键盘和终端
             } else {
-                updateListHeight(0.70f); // ★★★ 键盘收起时，同样保持 0.70f ★★★
+                updateListHeight(0.70f); // ★★★ 键盘收起时，列表恢复 0.70，终端保持短小 ★★★
             }
         });
     }
