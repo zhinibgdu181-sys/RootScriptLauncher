@@ -38,6 +38,9 @@ import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
 
+    // 🛠️ 自定义的专属执行目录
+    private static final String TARGET_DIR = "/data/local/tmp/com.example.rootlauncher/files";
+
     private TextView tvOutput;
     private EditText etInput;
     private ScrollView scrollView;
@@ -67,12 +70,15 @@ public class MainActivity extends AppCompatActivity {
                             displayName = "script_" + System.currentTimeMillis() + ".sh";
                         }
 
-                        File destFile = new File(getFilesDir(), displayName);
+                        File tempFile = new File(getFilesDir(), displayName);
+                        File finalFile = new File(TARGET_DIR, displayName);
+
                         try {
                             InputStream is = getContentResolver().openInputStream(uri);
                             if (is == null) return;
 
-                            FileOutputStream fos = new FileOutputStream(destFile);
+                            // 1. 先写到 App 私有目录（中转）
+                            FileOutputStream fos = new FileOutputStream(tempFile);
                             byte[] buffer = new byte[8192];
                             int len;
                             while ((len = is.read(buffer)) > 0) {
@@ -81,11 +87,13 @@ public class MainActivity extends AppCompatActivity {
                             is.close();
                             fos.close();
 
-                            Process chmod = new ProcessBuilder("chmod", "755", destFile.getAbsolutePath())
-                                    .redirectErrorStream(true).start();
-                            chmod.waitFor();
+                            // 2. 通过 su 移动并赋权（注意先 mkdir -p 创建目录）
+                            String cmd = "mkdir -p " + TARGET_DIR + " && cp " + shellQuote(tempFile.getAbsolutePath()) + " " + shellQuote(finalFile.getAbsolutePath()) + " && chmod 755 " + shellQuote(finalFile.getAbsolutePath());
+                            Process p = Runtime.getRuntime().exec(new String[]{findSu(), "-c", cmd});
+                            p.waitFor();
 
-                            scriptList.add(destFile.getAbsolutePath());
+                            // 3. 加入列表
+                            scriptList.add(finalFile.getAbsolutePath());
                             adapter.notifyDataSetChanged();
                             saveScripts();
                         } catch (Exception ignored) {}
@@ -110,8 +118,15 @@ public class MainActivity extends AppCompatActivity {
         adapter = new ScriptAdapter();
         lvScripts.setAdapter(adapter);
 
-        // 🛠️ 核心：自动提取安装包内的预设脚本（支持多个）
-        extractDefaultScripts();
+        // 🛠️ 初始化：在 onCreate 阶段提前创建好这个专属目录
+        new Thread(() -> {
+            try {
+                Runtime.getRuntime().exec(new String[]{findSu(), "-c", "mkdir -p " + TARGET_DIR}).waitFor();
+            } catch (Exception ignored) {}
+        }).start();
+
+        // 自动提取并安装预设脚本到专属目录
+        extractDefaultScriptsToTmp();
 
         btnAdd.setOnClickListener(v -> {
             Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
@@ -148,10 +163,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // 🛠️ 从 assets 提取预设脚本到私有目录，并加入列表
+    // 从 assets 提取预设脚本，并移动到专属目录
     // ============================================================
-    private void extractDefaultScripts() {
-        // 定义需要内置的脚本文件名列表
+    private void extractDefaultScriptsToTmp() {
         String[] defaultScripts = {
                 "Kairos_Driver_Loader_Release_90f76e9.sh",
                 "TIME_Cloud_Loader_Release_1732727.sh"
@@ -160,13 +174,14 @@ public class MainActivity extends AppCompatActivity {
         boolean hasNew = false;
 
         for (String scriptName : defaultScripts) {
-            File destFile = new File(getFilesDir(), scriptName);
+            File tempFile = new File(getFilesDir(), scriptName);
+            File finalFile = new File(TARGET_DIR, scriptName);
 
             try {
-                // 1. 如果文件不存在，从 assets 复制并赋予执行权限
-                if (!destFile.exists()) {
+                // 1. 从 assets 提取到私有目录
+                if (!tempFile.exists()) {
                     InputStream is = getAssets().open(scriptName);
-                    FileOutputStream fos = new FileOutputStream(destFile);
+                    FileOutputStream fos = new FileOutputStream(tempFile);
                     byte[] buffer = new byte[8192];
                     int len;
                     while ((len = is.read(buffer)) > 0) {
@@ -174,24 +189,24 @@ public class MainActivity extends AppCompatActivity {
                     }
                     is.close();
                     fos.close();
-
-                    Process chmod = new ProcessBuilder("chmod", "755", destFile.getAbsolutePath())
-                            .redirectErrorStream(true).start();
-                    chmod.waitFor();
                 }
 
-                // 2. 如果列表中还没有这个脚本，添加进去
-                if (!scriptList.contains(destFile.getAbsolutePath())) {
-                    scriptList.add(destFile.getAbsolutePath());
+                // 2. 移动到专属目录并赋权
+                if (!finalFile.exists()) {
+                    String cmd = "mkdir -p " + TARGET_DIR + " && cp " + shellQuote(tempFile.getAbsolutePath()) + " " + shellQuote(finalFile.getAbsolutePath()) + " && chmod 755 " + shellQuote(finalFile.getAbsolutePath());
+                    Process p = Runtime.getRuntime().exec(new String[]{findSu(), "-c", cmd});
+                    p.waitFor();
+                }
+
+                // 3. 加入列表
+                if (!scriptList.contains(finalFile.getAbsolutePath())) {
+                    scriptList.add(finalFile.getAbsolutePath());
                     hasNew = true;
                 }
 
-            } catch (Exception e) {
-                // 如果 assets 里没有这个文件，忽略即可，不影响用户手动添加
-            }
+            } catch (Exception ignored) {}
         }
 
-        // 如果有新增的，刷新列表并保存
         if (hasNew) {
             adapter.notifyDataSetChanged();
             saveScripts();
@@ -199,7 +214,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // 🛠️ 键盘监听：弹出键盘时缩小列表至 15%，收回键盘恢复 55%
+    // 键盘监听：弹出键盘时缩小列表至 15%，收回键盘恢复 55%
     // ============================================================
     private void setKeyboardListener() {
         final View rootView = findViewById(android.R.id.content);
@@ -239,7 +254,8 @@ public class MainActivity extends AppCompatActivity {
         etInput.setText("");
         new Thread(() -> {
             try {
-                String finalCmd = "export PATH=/data/local/tmp:/system/bin:/system/xbin:/vendor/bin:$PATH; " + cmd;
+                // PATH 里加上专属目录，且 cd 进去
+                String finalCmd = "export PATH=" + TARGET_DIR + ":/system/bin:/system/xbin:/vendor/bin:$PATH; cd " + TARGET_DIR + "; " + cmd;
                 ProcessBuilder pb = new ProcessBuilder(findSu(), "-c", finalCmd);
                 pb.redirectErrorStream(true);
                 Process p = pb.start();
@@ -329,7 +345,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             File elf = new File(scriptPath);
             if (!elf.exists() || !elf.isFile()) {
-                appendText("ELF 文件不存在\n");
+                appendText("脚本文件不存在\n");
                 return;
             }
 
@@ -339,13 +355,14 @@ public class MainActivity extends AppCompatActivity {
             }
 
             String suCmd = findSu();
-            String elfDir = elf.getParent();
-            if (elfDir == null) elfDir = getFilesDir().getAbsolutePath();
+            
+            // 🛠️ 执行目录就是我们的专属目录
+            String elfDir = TARGET_DIR; 
 
             String env = 
-                    "export PATH=" + shellQuote(busyboxFile.getParent() + ":/system/bin:/system/xbin:/vendor/bin") + ":$PATH; " +
-                    "export HOME=/data/local/tmp; " +
-                    "export TMPDIR=/data/local/tmp; " +
+                    "export PATH=" + shellQuote(TARGET_DIR + ":/system/bin:/system/xbin:/vendor/bin") + ":$PATH; " +
+                    "export HOME=" + TARGET_DIR + "; " +
+                    "export TMPDIR=" + TARGET_DIR + "; " +
                     "export LD_LIBRARY_PATH=/system/lib64:/vendor/lib64:$LD_LIBRARY_PATH; " +
                     "cd " + shellQuote(elfDir) + "; ";
 
@@ -428,11 +445,12 @@ public class MainActivity extends AppCompatActivity {
 
             if (!tempFile.exists() || tempFile.length() < 100000) return false;
 
-            busyboxFile = new File("/data/local/tmp/busybox");
+            // busybox 也放进专属目录
+            busyboxFile = new File(TARGET_DIR, "busybox");
             String src = shellQuote(tempFile.getAbsolutePath());
             String dst = shellQuote(busyboxFile.getAbsolutePath());
 
-            String installCommand = "rm -f " + dst + " ; cat " + src + " > " + dst + " ; chmod 755 " + dst;
+            String installCommand = "mkdir -p " + TARGET_DIR + " ; rm -f " + dst + " ; cat " + src + " > " + dst + " ; chmod 755 " + dst;
             Process installProcess = new ProcessBuilder(findSu(), "-c", installCommand)
                     .redirectErrorStream(true).start();
             installProcess.waitFor();
