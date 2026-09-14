@@ -6,6 +6,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Rect;
 import android.net.Uri;
@@ -18,6 +19,7 @@ import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -133,7 +135,7 @@ public class MainActivity extends AppCompatActivity {
                                         scriptList.add(runtimePath);
                                     }
                                 }
-                                saveScripts(); // ★ 确保保存顺序
+                                saveScripts();
 
                                 runOnUiThread(() -> {
                                     if (adapter != null) {
@@ -163,14 +165,15 @@ public class MainActivity extends AppCompatActivity {
         Button btnAdd = findViewById(R.id.btnAdd);
         Button btnSend = findViewById(R.id.btnSend);
 
+        // ★★★ 动态添加“排序”按钮 ★★★
+        initSortButton(btnAdd);
+
         tvOutput.setOnLongClickListener(v -> {
             showTerminalOptions();
             return true;
         });
 
         prefs = getSharedPreferences("script_prefs", MODE_PRIVATE);
-
-        // ★★★ 修改：按顺序加载已保存的脚本列表 ★★★
         loadScriptsOrdered();
 
         addBuiltinScript(BUILTIN_KAIROS);
@@ -209,9 +212,86 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ★★★ 新增：按顺序加载脚本列表 ★★★
+    // ★★★ 动态初始化排序按钮 ★★★
+    private void initSortButton(Button btnAdd) {
+        try {
+            // 获取顶部标题栏的父布局
+            ViewGroup parent = (ViewGroup) btnAdd.getParent();
+            if (parent == null) return;
+
+            Button btnSort = new Button(this);
+            btnSort.setText("排序");
+            btnSort.setTextColor(0xFFFFFFFF);
+            btnSort.setBackgroundTintList(ColorStateList.valueOf(0xFF2196F3));
+
+            // 设置按钮大小和右边距
+            int height = (int) (40 * getResources().getDisplayMetrics().density + 0.5f);
+            int marginRight = (int) (8 * getResources().getDisplayMetrics().density + 0.5f);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, height);
+            params.setMargins(0, 0, marginRight, 0);
+            btnSort.setLayoutParams(params);
+
+            // 把“排序”按钮插入到“+ 添加”按钮的左侧
+            int addIndex = parent.indexOfChild(btnAdd);
+            parent.addView(btnSort, addIndex);
+
+            btnSort.setOnClickListener(v -> showSortDialog());
+        } catch (Exception e) {
+            appendText("[-] 排序按钮初始化失败: " + e.getMessage() + "\n");
+        }
+    }
+
+    // ★★★ 弹出排序对话框 ★★★
+    private void showSortDialog() {
+        if (scriptList == null || scriptList.isEmpty()) {
+            appendText("[提示] 列表为空，无法排序\n");
+            return;
+        }
+        String[] items = new String[scriptList.size()];
+        for (int i = 0; i < scriptList.size(); i++) {
+            items[i] = (i + 1) + ". " + new File(scriptList.get(i)).getName();
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("选择要排序的脚本")
+                .setItems(items, (dialog, which) -> showMoveOptions(which))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ★★★ 移动选项 ★★★
+    private void showMoveOptions(int position) {
+        String[] options = {"上移", "下移", "置顶", "置底"};
+        new AlertDialog.Builder(this)
+                .setTitle("调整顺序")
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) moveScript(position, -1);
+                    else if (which == 1) moveScript(position, 1);
+                    else if (which == 2) moveScript(position, -position);
+                    else if (which == 3) moveScript(position, scriptList.size() - 1 - position);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ★★★ 执行移动逻辑 ★★★
+    private void moveScript(int position, int targetOffset) {
+        int targetPosition = position + targetOffset;
+        if (targetPosition < 0 || targetPosition >= scriptList.size() || position == targetPosition) {
+            return;
+        }
+        synchronized (scriptList) {
+            String item = scriptList.remove(position);
+            scriptList.add(targetPosition, item);
+        }
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
+        saveScripts();
+        appendText("[+] 顺序已调整：" + new File(scriptList.get(targetPosition)).getName() + "\n");
+    }
+
     private void loadScriptsOrdered() {
-        // 1. 尝试读取旧版本的数据（Set类型，无序），如果存在则迁移
         Set<String> oldSet = prefs.getStringSet("scripts", null);
         if (oldSet != null && !oldSet.isEmpty()) {
             for (String savedPath : oldSet) {
@@ -220,13 +300,11 @@ public class MainActivity extends AppCompatActivity {
                     scriptList.add(normalized);
                 }
             }
-            // 迁移完成后立刻按新格式保存一次，并删除旧数据
             saveScripts();
             prefs.edit().remove("scripts").apply();
             return;
         }
 
-        // 2. 读取新版本的数据（String类型，有序）
         String savedStr = prefs.getString("scripts_ordered", "");
         if (!savedStr.isEmpty()) {
             String[] paths = savedStr.split("\n");
@@ -239,11 +317,9 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ★★★ 新增：按顺序保存脚本列表 ★★★
     private void saveScripts() {
         if (prefs == null) return;
         synchronized (scriptList) {
-            // 用换行符拼接，确保按列表顺序保存
             StringBuilder sb = new StringBuilder();
             for (String path : scriptList) {
                 sb.append(path).append("\n");
@@ -336,7 +412,7 @@ public class MainActivity extends AppCompatActivity {
         String runtimePath = RUNTIME_DIR + "/" + assetName;
         if (!scriptList.contains(runtimePath)) {
             scriptList.add(runtimePath);
-            saveScripts(); // 注意内置脚本如果添加了也要保存
+            saveScripts();
         }
     }
 
@@ -858,6 +934,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (tvName != null) tvName.setText(fileName);
             if (btnRun != null) btnRun.setOnClickListener(v -> runElf(path));
+            
             if (btnDelete != null) {
                 btnDelete.setOnClickListener(v -> {
                     synchronized (scriptList) {
@@ -866,7 +943,7 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                     adapter.notifyDataSetChanged();
-                    saveScripts(); // 删除后也要保存
+                    saveScripts();
                 });
             }
             return convertView;
@@ -889,4 +966,4 @@ public class MainActivity extends AppCompatActivity {
         stopCurrentElf();
         super.onDestroy();
     }
-}
+            }
