@@ -73,60 +73,52 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        // 2. ★★★ 新增：先检查 Root 权限，如果没 Root，弹出提示框 ★★★
+        // 2. 检查 Root 权限
         if (!checkRootPermission()) {
             showRootDialog();
-            return; // 没 Root 就不往下走了，等弹窗里重新检测
+            return; 
         }
 
-        // 3. 有 Root 权限，正常初始化界面和环境
+        // 3. 有 Root 权限，正常初始化
         initViews();
         initEnvironment();
         initKeyboardListener();
         initListeners();
         
-        // ★★★ 新增：强制初始化高度比例，保证脚本列表占 55%，终端占 45% ★★★
-        updateListHeight(0.55f);
+        // ★★★ 将原来 0.55f 修改为 0.70f：列表占比70%，终端缩短 ★★★
+        updateListHeight(0.70f);
     }
 
     // ====================== Root 检测与弹窗模块 ======================
-    /**
-     * 检查 Root 权限是否可用
-     */
     private boolean checkRootPermission() {
         Process process = null;
         try {
             process = Runtime.getRuntime().exec("su -c id");
             BufferedReader in = new BufferedReader(new InputStreamReader(process.getInputStream()));
             String line = in.readLine();
-            // 如果返回的结果包含 uid=0，说明有 Root 权限
             return line != null && line.contains("uid=0");
         } catch (Exception e) {
             e.printStackTrace();
-            return false; // 捕获到异常（如 IOException），说明没有 Root 权限
+            return false;
         } finally {
             if (process != null) process.destroy();
         }
     }
 
-    /**
-     * 显示需要 Root 权限的弹窗
-     */
     private void showRootDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("需要 Root 权限")
                 .setMessage("未找到可用的 su 环境（IOException）。\n请确保您的设备已获取 Root 权限。")
                 .setPositiveButton("重新检测", (dialog, which) -> {
                     if (checkRootPermission()) {
-                        // 检测通过了，重新初始化界面和环境
                         initViews();
                         initEnvironment();
                         initKeyboardListener();
                         initListeners();
-                        updateListHeight(0.55f);
+                        updateListHeight(0.70f);
                     } else {
                         Toast.makeText(MainActivity.this, "仍未获取 Root 权限！", Toast.LENGTH_SHORT).show();
-                        showRootDialog(); // 再次弹窗
+                        showRootDialog();
                     }
                 })
                 .setNegativeButton("退出应用", (dialog, which) -> {
@@ -144,7 +136,6 @@ public class MainActivity extends AppCompatActivity {
                     getPackageName(), PackageManager.GET_SIGNATURES);
             String currentSig = Base64.encodeToString(
                     packageInfo.signatures[0].toByteArray(), Base64.DEFAULT);
-            // 默认占位符直接放行，方便测试
             if (OFFICIAL_SIGNATURE.equals("你的正式签名Base64字符串==")) {
                 return true;
             }
@@ -172,7 +163,6 @@ public class MainActivity extends AppCompatActivity {
         new Thread(() -> {
             executeSuCommand("mkdir -p " + TARGET_DIR);
 
-            // 提取内置资源（原样拷贝）
             extractAssetFile("busybox", TARGET_DIR + "/busybox");
             for (String script : DEFAULT_SCRIPTS) {
                 extractAssetFile(script, TARGET_DIR + "/" + script);
@@ -180,7 +170,6 @@ public class MainActivity extends AppCompatActivity {
 
             executeSuCommand("chmod 755 " + TARGET_DIR + "/*");
 
-            // ★ 修复 DNS 解析，解决 nc: bad address
             String resolvPath = TARGET_DIR + "/resolv.conf";
             String dnsContent = "nameserver 114.114.114.114\\nnameserver 8.8.8.8\\n";
             executeSuCommand("echo -e \"" + dnsContent + "\" > " + resolvPath + " && chmod 644 " + resolvPath);
@@ -225,9 +214,9 @@ public class MainActivity extends AppCompatActivity {
         scrollView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
             int heightDiff = scrollView.getRootView().getHeight() - scrollView.getHeight();
             if (heightDiff > 500) {
-                updateListHeight(0.15f); // 键盘弹起
+                updateListHeight(0.15f); // 键盘弹起时列表高度
             } else {
-                updateListHeight(0.55f); // 键盘收起
+                updateListHeight(0.70f); // ★★★ 键盘收起时，同样保持 0.70f ★★★
             }
         });
     }
