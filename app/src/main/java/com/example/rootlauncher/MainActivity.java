@@ -418,7 +418,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // ★ 核心修改：重写 runElfReal，完美支持 PTY 交互
+    // ★ 核心：智能检测 ELF 或 脚本，使用不同的执行策略
     // ============================================================
     private void runElfReal(String scriptPath) {
         stopCurrentElf();
@@ -451,17 +451,24 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // 检查权限并赋予 755
             if (!chmod755(runtimePath)) {
                 appendText("[ELF] chmod 755 失败，请确认 Root 权限正常\n");
                 return;
             }
 
-            // 确保 BusyBox 准备好
             if (!extractAndPrepareBusybox()) {
                 appendText("[ELF] APK 内置 BusyBox 初始化失败\n");
                 return;
             }
+
+            // ★ 1. 检测文件类型：是 ELF 还是 脚本？
+            String headerCmd = "head -c 4 " + shellQuote(runtimePath) + " | od -An -tx1";
+            Process headerProcess = new ProcessBuilder(findSu(), "-c", headerCmd).redirectErrorStream(true).start();
+            String headerOutput = readAll(headerProcess.getInputStream()).trim().toLowerCase();
+            headerProcess.waitFor();
+
+            // 判断是否包含 ELF 魔数: 7f 45 4c 46
+            boolean isElfFile = headerOutput.contains("7f 45 4c 46");
 
             String suCmd = findSu();
             String elfDir = elf.getParent();
@@ -473,17 +480,23 @@ public class MainActivity extends AppCompatActivity {
                     "export LD_LIBRARY_PATH=" + shellQuote("/system/lib64:/vendor/lib64") + ":$LD_LIBRARY_PATH; " +
                     "cd " + shellQuote(elfDir) + "; ";
 
-            // 用 exec 直接执行 ELF
             String elfCommand = "exec " + shellQuote(elf.getAbsolutePath());
 
-            // ★ 核心：用 busybox script 包裹，分配 PTY 伪终端，确保能交互
-            // 注意：busybox script 的 -c 参数接受一个要执行的命令
-            String command = env + shellQuote(RUNTIME_BUSYBOX) + " script -q -c " + shellQuote(elfCommand) + " /dev/null";
+            // ★ 2. 根据文件类型，选择不同的执行方式
+            String command;
+            if (isElfFile) {
+                // 如果是 ELF：直接执行，不套 busybox script
+                command = env + elfCommand;
+                appendText("[ELF] 检测到 ELF 文件，直接执行\n");
+            } else {
+                // 如果是脚本：用 busybox script 提供 PTY，支持交互
+                command = env + shellQuote(RUNTIME_BUSYBOX) + " script -q -c " + shellQuote(elfCommand) + " /dev/null";
+                appendText("[ELF] 检测到脚本文件，使用 PTY 执行\n");
+            }
 
             appendText("[执行命令]\n" + command + "\n");
 
             ProcessBuilder pb = new ProcessBuilder(suCmd, "-c", command);
-            // 重定向 stderr 到 stdout，以便捕获 linker 错误
             pb.redirectErrorStream(true);
             try {
                 pb.directory(new File(elfDir));
@@ -495,8 +508,7 @@ public class MainActivity extends AppCompatActivity {
             writer = new BufferedWriter(new OutputStreamWriter(currentProcess.getOutputStream(), StandardCharsets.UTF_8));
             elfRunning = true;
 
-            appendText("[+] ELF 已启动 (PTY)\n");
-            appendText("[+] ELF：" + runtimePath + "\n");
+            appendText("[+] 已启动\n");
 
             Thread stdoutThread = new Thread(() -> {
                 try {
@@ -521,7 +533,7 @@ public class MainActivity extends AppCompatActivity {
                     int exitCode = currentProcess.waitFor();
                     stdoutThread.join(1000);
                     final int code = exitCode;
-                    runOnUiThread(() -> appendText("\n[ELF exit " + code + "]\n"));
+                    runOnUiThread(() -> appendText("\n[exit " + code + "]\n"));
                 } catch (Exception ignored) {
                 } finally {
                     if (process == currentProcess) {
@@ -536,7 +548,7 @@ public class MainActivity extends AppCompatActivity {
             writer = null;
             process = null;
             elfRunning = false;
-            appendText("[ELF 启动失败] " + e.getMessage() + "\n");
+            appendText("[启动失败] " + e.getMessage() + "\n");
         }
     }
 
