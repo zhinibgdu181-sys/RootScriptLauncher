@@ -6,15 +6,12 @@
 
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-
     android:orientation="vertical"
     android:background="#000000"
-
     android:padding="8dp"
-
     tools:context=".MainActivity">
 
-    <!-- 顶部：脚本列表区域 -->
+    <!-- ==================== 脚本区域 ==================== -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -37,7 +34,7 @@
         <ListView
             android:id="@+id/lvScripts"
             android:layout_width="match_parent"
-            android:layout_height="120dp"
+            android:layout_height="220dp"
             android:layout_marginTop="5dp"
             android:background="#000000"
             android:divider="#333333"
@@ -48,7 +45,7 @@
     </LinearLayout>
 
 
-    <!-- 中间：终端区域 -->
+    <!-- ==================== 终端区域 ==================== -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -57,7 +54,6 @@
         android:orientation="vertical"
         android:background="#000000">
 
-        <!-- 终端标题栏 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="30dp"
@@ -69,7 +65,6 @@
             android:textSize="13sp"
             android:background="#151515" />
 
-        <!-- 输出区域 -->
         <ScrollView
             android:id="@+id/scrollView"
             android:layout_width="match_parent"
@@ -99,7 +94,7 @@
     </LinearLayout>
 
 
-    <!-- 底部：输入框 + 发送按钮 -->
+    <!-- ==================== 输入区域 ==================== -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -145,5 +140,6 @@
     </LinearLayout>
 
 </LinearLayout>
+
 
 
