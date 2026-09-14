@@ -22,7 +22,6 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.constraintlayout.widget.ConstraintLayout;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -43,7 +42,7 @@ public class MainActivity extends AppCompatActivity {
             "TIME_Cloud_Loader_Release_1732727.sh"
     };
 
-    // 签名校验（默认占位符会直接放行，千万不要去改成真实的，否则会闪退）
+    // 签名校验（默认占位符会直接放行）
     private static final String OFFICIAL_SIGNATURE = "你的正式签名Base64字符串==";
 
     // UI 控件
@@ -82,10 +81,7 @@ public class MainActivity extends AppCompatActivity {
         // 3. 有 Root 权限，正常初始化
         initViews();
         initEnvironment();
-        initKeyboardListener();
         initListeners();
-        
-        // 注意：这里去掉了强制 updateListHeight 的操作，完全交给 XML 的 0.70 固定比例，防止一变长就乱。
     }
 
     // ====================== Root 检测与弹窗模块 ======================
@@ -112,7 +108,6 @@ public class MainActivity extends AppCompatActivity {
                     if (checkRootPermission()) {
                         initViews();
                         initEnvironment();
-                        initKeyboardListener();
                         initListeners();
                     } else {
                         Toast.makeText(MainActivity.this, "仍未获取 Root 权限！", Toast.LENGTH_SHORT).show();
@@ -206,23 +201,6 @@ public class MainActivity extends AppCompatActivity {
             scriptList.add(script);
         }
         adapter.notifyDataSetChanged();
-    }
-
-    private void initKeyboardListener() {
-        scrollView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
-            int heightDiff = scrollView.getRootView().getHeight() - scrollView.getHeight();
-            if (heightDiff > 500) {
-                updateListHeight(0.15f); // 键盘弹起时列表变短，腾出空间给键盘和终端
-            } else {
-                updateListHeight(0.70f); // ★★★ 键盘收起时，列表恢复 0.70，终端保持短小 ★★★
-            }
-        });
-    }
-
-    private void updateListHeight(float percent) {
-        ConstraintLayout.LayoutParams params = (ConstraintLayout.LayoutParams) lvScripts.getLayoutParams();
-        params.matchConstraintPercentHeight = percent;
-        lvScripts.setLayoutParams(params);
     }
 
     private void initListeners() {
