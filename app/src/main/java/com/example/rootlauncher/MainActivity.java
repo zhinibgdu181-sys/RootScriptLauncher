@@ -133,7 +133,7 @@ public class MainActivity extends AppCompatActivity {
                                         scriptList.add(runtimePath);
                                     }
                                 }
-                                saveScripts();
+                                saveScripts(); // ★ 确保保存顺序
 
                                 runOnUiThread(() -> {
                                     if (adapter != null) {
@@ -163,7 +163,6 @@ public class MainActivity extends AppCompatActivity {
         Button btnAdd = findViewById(R.id.btnAdd);
         Button btnSend = findViewById(R.id.btnSend);
 
-        // ★★★ 核心新增：长按终端区域，弹出复制菜单 ★★★
         tvOutput.setOnLongClickListener(v -> {
             showTerminalOptions();
             return true;
@@ -171,13 +170,8 @@ public class MainActivity extends AppCompatActivity {
 
         prefs = getSharedPreferences("script_prefs", MODE_PRIVATE);
 
-        Set<String> savedScripts = prefs.getStringSet("scripts", new HashSet<>());
-        for (String savedPath : savedScripts) {
-            String normalized = normalizeSavedPath(savedPath);
-            if (normalized != null && !scriptList.contains(normalized)) {
-                scriptList.add(normalized);
-            }
-        }
+        // ★★★ 修改：按顺序加载已保存的脚本列表 ★★★
+        loadScriptsOrdered();
 
         addBuiltinScript(BUILTIN_KAIROS);
         addBuiltinScript(BUILTIN_TIME);
@@ -215,7 +209,49 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ★★★ 终端操作菜单 ★★★
+    // ★★★ 新增：按顺序加载脚本列表 ★★★
+    private void loadScriptsOrdered() {
+        // 1. 尝试读取旧版本的数据（Set类型，无序），如果存在则迁移
+        Set<String> oldSet = prefs.getStringSet("scripts", null);
+        if (oldSet != null && !oldSet.isEmpty()) {
+            for (String savedPath : oldSet) {
+                String normalized = normalizeSavedPath(savedPath);
+                if (normalized != null && !scriptList.contains(normalized)) {
+                    scriptList.add(normalized);
+                }
+            }
+            // 迁移完成后立刻按新格式保存一次，并删除旧数据
+            saveScripts();
+            prefs.edit().remove("scripts").apply();
+            return;
+        }
+
+        // 2. 读取新版本的数据（String类型，有序）
+        String savedStr = prefs.getString("scripts_ordered", "");
+        if (!savedStr.isEmpty()) {
+            String[] paths = savedStr.split("\n");
+            for (String savedPath : paths) {
+                String normalized = normalizeSavedPath(savedPath);
+                if (normalized != null && !scriptList.contains(normalized)) {
+                    scriptList.add(normalized);
+                }
+            }
+        }
+    }
+
+    // ★★★ 新增：按顺序保存脚本列表 ★★★
+    private void saveScripts() {
+        if (prefs == null) return;
+        synchronized (scriptList) {
+            // 用换行符拼接，确保按列表顺序保存
+            StringBuilder sb = new StringBuilder();
+            for (String path : scriptList) {
+                sb.append(path).append("\n");
+            }
+            prefs.edit().putString("scripts_ordered", sb.toString()).apply();
+        }
+    }
+
     private void showTerminalOptions() {
         String[] options = {"复制全部", "清空终端"};
         new AlertDialog.Builder(this)
@@ -233,7 +269,6 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    // ★★★ 复制终端文本到剪贴板 ★★★
     private void copyTerminalText() {
         if (tvOutput == null) return;
         String text = tvOutput.getText().toString();
@@ -301,8 +336,8 @@ public class MainActivity extends AppCompatActivity {
         String runtimePath = RUNTIME_DIR + "/" + assetName;
         if (!scriptList.contains(runtimePath)) {
             scriptList.add(runtimePath);
+            saveScripts(); // 注意内置脚本如果添加了也要保存
         }
-        saveScripts();
     }
 
     private boolean installBuiltinAsset(String assetName) {
@@ -796,13 +831,6 @@ public class MainActivity extends AppCompatActivity {
         return newPath;
     }
 
-    private void saveScripts() {
-        if (prefs == null) return;
-        synchronized (scriptList) {
-            prefs.edit().putStringSet("scripts", new HashSet<>(scriptList)).apply();
-        }
-    }
-
     private class ScriptAdapter extends ArrayAdapter<String> {
         ScriptAdapter() {
             super(MainActivity.this, 0, scriptList);
@@ -838,7 +866,7 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                     adapter.notifyDataSetChanged();
-                    saveScripts();
+                    saveScripts(); // 删除后也要保存
                 });
             }
             return convertView;
@@ -861,4 +889,4 @@ public class MainActivity extends AppCompatActivity {
         stopCurrentElf();
         super.onDestroy();
     }
-                                                           }
+}
