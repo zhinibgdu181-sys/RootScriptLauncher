@@ -144,10 +144,6 @@ public class MainActivity extends AppCompatActivity {
 
                             try {
 
-                                // ------------------------------------------------
-                                // Copy to app private directory
-                                // ------------------------------------------------
-
                                 tempFile =
                                         new File(
                                                 getFilesDir(),
@@ -200,10 +196,6 @@ public class MainActivity extends AppCompatActivity {
                                 } catch (Exception ignored) {
                                 }
 
-                                // ------------------------------------------------
-                                // Check
-                                // ------------------------------------------------
-
                                 if (!tempFile.exists()
                                         || tempFile.length() == 0) {
 
@@ -222,10 +214,6 @@ public class MainActivity extends AppCompatActivity {
                                                 + tempFile.length()
                                                 + " bytes\n"
                                 );
-
-                                // ------------------------------------------------
-                                // Detect file type before root copy
-                                // ------------------------------------------------
 
                                 ElfInfo localInfo =
                                         inspectElfFile(
@@ -288,10 +276,6 @@ public class MainActivity extends AppCompatActivity {
                                     );
                                 }
 
-                                // ------------------------------------------------
-                                // Root
-                                // ------------------------------------------------
-
                                 if (!checkRoot()) {
 
                                     appendText(
@@ -300,10 +284,6 @@ public class MainActivity extends AppCompatActivity {
 
                                     return;
                                 }
-
-                                // ------------------------------------------------
-                                // Runtime directory
-                                // ------------------------------------------------
 
                                 if (!prepareRuntimeDir()) {
 
@@ -314,18 +294,10 @@ public class MainActivity extends AppCompatActivity {
                                     return;
                                 }
 
-                                // ------------------------------------------------
-                                // Destination
-                                // ------------------------------------------------
-
                                 String runtimePath =
                                         RUNTIME_DIR
                                                 + "/"
                                                 + finalDisplayName;
-
-                                // ------------------------------------------------
-                                // Root copy
-                                // ------------------------------------------------
 
                                 if (!copyFileAsRoot(
                                         tempFile.getAbsolutePath(),
@@ -339,10 +311,6 @@ public class MainActivity extends AppCompatActivity {
                                     return;
                                 }
 
-                                // ------------------------------------------------
-                                // chmod
-                                // ------------------------------------------------
-
                                 if (!chmod755(runtimePath)) {
 
                                     appendText(
@@ -351,10 +319,6 @@ public class MainActivity extends AppCompatActivity {
 
                                     return;
                                 }
-
-                                // ------------------------------------------------
-                                // Root ELF inspect
-                                // ------------------------------------------------
 
                                 ElfInfo rootInfo =
                                         inspectElfAsRoot(
@@ -385,10 +349,6 @@ public class MainActivity extends AppCompatActivity {
                                         );
                                     }
                                 }
-
-                                // ------------------------------------------------
-                                // Add
-                                // ------------------------------------------------
 
                                 synchronized (scriptList) {
 
@@ -504,10 +464,6 @@ public class MainActivity extends AppCompatActivity {
                         MODE_PRIVATE
                 );
 
-        // ========================================================
-        // Restore list
-        // ========================================================
-
         Set<String> savedScripts =
                 prefs.getStringSet(
                         "scripts",
@@ -536,10 +492,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // ========================================================
-        // Builtins
-        // ========================================================
-
         addBuiltinScript(
                 BUILTIN_KAIROS
         );
@@ -547,10 +499,6 @@ public class MainActivity extends AppCompatActivity {
         addBuiltinScript(
                 BUILTIN_TIME
         );
-
-        // ========================================================
-        // Adapter
-        // ========================================================
 
         adapter =
                 new ScriptAdapter();
@@ -560,10 +508,6 @@ public class MainActivity extends AppCompatActivity {
         );
 
         setupKeyboardListener();
-
-        // ========================================================
-        // Root initialization
-        // ========================================================
 
         new Thread(() -> {
 
@@ -603,10 +547,6 @@ public class MainActivity extends AppCompatActivity {
 
         }).start();
 
-        // ========================================================
-        // Add
-        // ========================================================
-
         btnAdd.setOnClickListener(v -> {
 
             Intent intent =
@@ -624,10 +564,6 @@ public class MainActivity extends AppCompatActivity {
                     intent
             );
         });
-
-        // ========================================================
-        // Execute / Input
-        // ========================================================
 
         btnSend.setOnClickListener(v -> {
 
@@ -898,10 +834,6 @@ public class MainActivity extends AppCompatActivity {
                             + " bytes\n"
             );
 
-            // ----------------------------------------------------
-            // Detect
-            // ----------------------------------------------------
-
             ElfInfo info =
                     inspectElfFile(
                             tempFile
@@ -939,10 +871,6 @@ public class MainActivity extends AppCompatActivity {
                         "[内置文件] 警告：不是 ELF / shebang\n"
                 );
             }
-
-            // ----------------------------------------------------
-            // Root copy
-            // ----------------------------------------------------
 
             String runtimePath =
                     RUNTIME_DIR
@@ -1412,10 +1340,6 @@ public class MainActivity extends AppCompatActivity {
 
         try {
 
-            // ----------------------------------------------------
-            // Root
-            // ----------------------------------------------------
-
             if (!checkRoot()) {
 
                 pendingScriptPath =
@@ -1430,10 +1354,6 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // ----------------------------------------------------
-            // Runtime
-            // ----------------------------------------------------
-
             if (!prepareRuntimeDir()) {
 
                 appendText(
@@ -1442,10 +1362,6 @@ public class MainActivity extends AppCompatActivity {
 
                 return;
             }
-
-            // ----------------------------------------------------
-            // Normalize
-            // ----------------------------------------------------
 
             String runtimePath =
                     normalizeSavedPath(
@@ -1468,10 +1384,6 @@ public class MainActivity extends AppCompatActivity {
 
             String fileName =
                     target.getName();
-
-            // ----------------------------------------------------
-            // Builtin
-            // ----------------------------------------------------
 
             if (BUILTIN_KAIROS.equals(
                     fileName
@@ -1501,10 +1413,6 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
             }
-
-            // ----------------------------------------------------
-            // File check
-            // ----------------------------------------------------
 
             if (!target.exists()) {
 
@@ -1557,10 +1465,6 @@ public class MainActivity extends AppCompatActivity {
                             + " bytes\n"
             );
 
-            // ----------------------------------------------------
-            // chmod
-            // ----------------------------------------------------
-
             if (!chmod755(
                     runtimePath
             )) {
@@ -1571,10 +1475,6 @@ public class MainActivity extends AppCompatActivity {
 
                 return;
             }
-
-            // ----------------------------------------------------
-            // Root inspect
-            // ----------------------------------------------------
 
             ElfInfo info =
                     inspectElfAsRoot(
@@ -1589,10 +1489,6 @@ public class MainActivity extends AppCompatActivity {
 
                 return;
             }
-
-            // ----------------------------------------------------
-            // ELF
-            // ----------------------------------------------------
 
             if (info.isElf) {
 
@@ -1668,10 +1564,6 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // ----------------------------------------------------
-            // ls
-            // ----------------------------------------------------
-
             String lsOutput =
                     rootLs(
                             runtimePath
@@ -1686,10 +1578,6 @@ public class MainActivity extends AppCompatActivity {
                 );
             }
 
-            // ----------------------------------------------------
-            // Work directory
-            // ----------------------------------------------------
-
             String workDir =
                     target.getParent();
 
@@ -1699,23 +1587,6 @@ public class MainActivity extends AppCompatActivity {
                 workDir =
                         RUNTIME_DIR;
             }
-
-            // ----------------------------------------------------
-            // Environment
-            //
-            // 重点：
-            //
-            // 不再硬编码 linker64。
-            //
-            // 不再强制使用 64-bit LD_LIBRARY_PATH。
-            //
-            // 对 ELF：
-            //
-            //     exec '/path/to/file'
-            //
-            // 让 Linux kernel 根据 PT_INTERP
-            // 自动加载对应 linker。
-            // ----------------------------------------------------
 
             StringBuilder env =
                     new StringBuilder();
@@ -1766,13 +1637,6 @@ public class MainActivity extends AppCompatActivity {
                     "; "
             );
 
-            // ----------------------------------------------------
-            // Do NOT force LD_LIBRARY_PATH for ELF.
-            //
-            // Android's linker uses the ELF's own dependency
-            // information and platform linker configuration.
-            // ----------------------------------------------------
-
             env.append(
                     "cd "
             );
@@ -1787,36 +1651,9 @@ public class MainActivity extends AppCompatActivity {
                     "; "
             );
 
-            // ----------------------------------------------------
-            // ELF execution
-            // ----------------------------------------------------
-
             String command;
 
             if (info.isElf) {
-
-                /*
-                 * 最重要：
-                 *
-                 * 不要：
-                 *
-                 * linker64 ELF
-                 *
-                 * 不要：
-                 *
-                 * busybox script -q ...
-                 *
-                 * 不要：
-                 *
-                 * 强行指定 /system/bin/linker64
-                 *
-                 * 直接：
-                 *
-                 * exec /path/to/ELF
-                 *
-                 * Kernel 会按照 ELF PT_INTERP
-                 * 选择对应的 interpreter。
-                 */
 
                 command =
                         env.toString()
@@ -1858,10 +1695,6 @@ public class MainActivity extends AppCompatActivity {
 
             } else {
 
-                // ------------------------------------------------
-                // Shell script
-                // ------------------------------------------------
-
                 String interpreter =
                         resolveScriptInterpreter(
                                 info.shebang
@@ -1900,10 +1733,6 @@ public class MainActivity extends AppCompatActivity {
                             + "\n"
             );
 
-            // ----------------------------------------------------
-            // Process
-            // ----------------------------------------------------
-
             ProcessBuilder pb =
                     new ProcessBuilder(
                             findSu(),
@@ -1932,10 +1761,6 @@ public class MainActivity extends AppCompatActivity {
             final Process currentProcess =
                     process;
 
-            // ----------------------------------------------------
-            // stdin
-            // ----------------------------------------------------
-
             writer =
                     new BufferedWriter(
                             new OutputStreamWriter(
@@ -1963,10 +1788,6 @@ public class MainActivity extends AppCompatActivity {
             appendText(
                     "================================\n\n"
             );
-
-            // ----------------------------------------------------
-            // stdout
-            // ----------------------------------------------------
 
             Thread stdoutThread =
                     new Thread(() -> {
@@ -2031,10 +1852,6 @@ public class MainActivity extends AppCompatActivity {
             stdoutThread.setName(
                     "ELF-stdout"
             );
-
-            // ----------------------------------------------------
-            // stderr
-            // ----------------------------------------------------
 
             Thread stderrThread =
                     new Thread(() -> {
@@ -2104,10 +1921,6 @@ public class MainActivity extends AppCompatActivity {
 
             stderrThread.start();
 
-            // ----------------------------------------------------
-            // Wait
-            // ----------------------------------------------------
-
             new Thread(() -> {
 
                 try {
@@ -2159,6 +1972,7 @@ public class MainActivity extends AppCompatActivity {
                         elfRunning =
                                 false;
                     }
+
                 }
 
             }, "ELF-waiter").start();
@@ -2188,19 +2002,10 @@ public class MainActivity extends AppCompatActivity {
             Process p
     ) {
 
-        if (p == null) {
-
-            return -1;
-        }
-
-        try {
-
-            return p.pid();
-
-        } catch (Throwable ignored) {
-
-            return -1;
-        }
+        // 当前 Android/Java 编译环境不提供
+        // Process.pid()，因此不调用该 API。
+        // 保留方法以兼容现有调用。
+        return -1;
     }
 
     // ============================================================
@@ -2537,24 +2342,6 @@ public class MainActivity extends AppCompatActivity {
 
     // ============================================================
     // Inspect ELF from Java file
-    //
-    // 支持：
-    //
-    // ELF32
-    // ELF64
-    //
-    // ARM
-    // AArch64
-    // x86
-    // x86_64
-    // MIPS
-    // MIPS64
-    // RISC-V
-    // 等
-    //
-    // 同时解析：
-    //
-    // PT_INTERP
     // ============================================================
 
     private ElfInfo inspectElfFile(
@@ -2592,10 +2379,6 @@ public class MainActivity extends AppCompatActivity {
 
                 return info;
             }
-
-            // ----------------------------------------------------
-            // ELF
-            // ----------------------------------------------------
 
             if ((ident[0] & 0xff) == 0x7f
                     && (ident[1] & 0xff) == 0x45
@@ -2757,10 +2540,6 @@ public class MainActivity extends AppCompatActivity {
                                 machine
                         );
 
-                // ------------------------------------------------
-                // Program headers
-                // ------------------------------------------------
-
                 if (ePhOff > 0
                         && ePhNum > 0
                         && ePhNum < 4096
@@ -2808,7 +2587,6 @@ public class MainActivity extends AppCompatActivity {
                                         info.littleEndian
                                 );
 
-                        // PT_INTERP
                         if (pType == 3) {
 
                             long pOffset;
@@ -2895,10 +2673,6 @@ public class MainActivity extends AppCompatActivity {
                 return info;
             }
 
-            // ----------------------------------------------------
-            // Shebang
-            // ----------------------------------------------------
-
             if ((ident[0] & 0xff) == '#'
                     && (ident[1] & 0xff) == '!') {
 
@@ -2980,12 +2754,6 @@ public class MainActivity extends AppCompatActivity {
                             .redirectErrorStream(true)
                             .start();
 
-            /*
-             * ELF 通常不需要很大。
-             *
-             * 这里把前 1MB 取回来，
-             * 足够覆盖正常 ELF header / program headers。
-             */
             java.io.ByteArrayOutputStream bos =
                     new java.io.ByteArrayOutputStream();
 
@@ -3060,10 +2828,6 @@ public class MainActivity extends AppCompatActivity {
 
             return info;
         }
-
-        // --------------------------------------------------------
-        // ELF
-        // --------------------------------------------------------
 
         if ((data[0] & 0xff) == 0x7f
                 && (data[1] & 0xff) == 0x45
@@ -3200,10 +2964,6 @@ public class MainActivity extends AppCompatActivity {
 
             return info;
         }
-
-        // --------------------------------------------------------
-        // Shebang
-        // --------------------------------------------------------
 
         if ((data[0] & 0xff) == '#'
                 && (data[1] & 0xff) == '!') {
@@ -3612,20 +3372,12 @@ public class MainActivity extends AppCompatActivity {
         String interpreter =
                 parts[0];
 
-        // --------------------------------------------------------
-        // Common Android paths
-        // --------------------------------------------------------
-
         if (fileExistsAsRoot(
                 interpreter
         )) {
 
             return interpreter;
         }
-
-        // --------------------------------------------------------
-        // env bash/sh/etc.
-        // --------------------------------------------------------
 
         if ("/usr/bin/env".equals(
                 interpreter
@@ -3669,10 +3421,6 @@ public class MainActivity extends AppCompatActivity {
 
             return "/system/bin/sh";
         }
-
-        // --------------------------------------------------------
-        // Common Linux paths
-        // --------------------------------------------------------
 
         if ("/bin/sh".equals(
                 interpreter
@@ -4237,4 +3985,4 @@ public class MainActivity extends AppCompatActivity {
 
         super.onDestroy();
     }
-                            }
+                    }
