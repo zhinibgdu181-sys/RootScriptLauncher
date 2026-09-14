@@ -42,7 +42,8 @@ public class MainActivity extends AppCompatActivity {
             "TIME_Cloud_Loader_Release_1732727.sh"
     };
 
-    // ★★★ 你的正式签名 Base64 字符串（默认占位符会直接放行，正式发版务必替换！）★★★
+    // ★★★ 签名校验（默认占位符会放行）★★★
+    // 等你用 MT 管理器签名 Release 包后，把那个包的 Base64 签名填到这里，再重新编译
     private static final String OFFICIAL_SIGNATURE = "你的正式签名Base64字符串==";
 
     // UI 控件
@@ -62,7 +63,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // ★★★ 签名校验：如果用的 Debug 签名且未替换 OFFICIAL_SIGNATURE，会直接放行 ★★★
+        // 签名校验（正式发版时如果混淆后闪退，请先注释掉这段）
         if (!checkSignature()) {
             Toast.makeText(this, "签名校验失败，请使用官方版本！", Toast.LENGTH_LONG).show();
             finish();
@@ -84,7 +85,7 @@ public class MainActivity extends AppCompatActivity {
                     getPackageName(), PackageManager.GET_SIGNATURES);
             String currentSig = Base64.encodeToString(
                     packageInfo.signatures[0].toByteArray(), Base64.DEFAULT);
-            // 如果官方签名是默认占位符，则放行
+            // 默认占位符直接放行，方便测试
             if (OFFICIAL_SIGNATURE.equals("你的正式签名Base64字符串==")) {
                 return true;
             }
@@ -112,7 +113,7 @@ public class MainActivity extends AppCompatActivity {
         new Thread(() -> {
             executeSuCommand("mkdir -p " + TARGET_DIR);
 
-            // 提取内置资源（原样拷贝，不做任何加解密）
+            // 提取内置资源（原样拷贝，不加解密）
             extractAssetFile("busybox", TARGET_DIR + "/busybox");
             for (String script : DEFAULT_SCRIPTS) {
                 extractAssetFile(script, TARGET_DIR + "/" + script);
@@ -120,7 +121,7 @@ public class MainActivity extends AppCompatActivity {
 
             executeSuCommand("chmod 755 " + TARGET_DIR + "/*");
 
-            // ★ 修复 DNS 解析，解决 nc: bad address ★
+            // 修复 DNS 解析，解决 nc: bad address
             String resolvPath = TARGET_DIR + "/resolv.conf";
             String dnsContent = "nameserver 114.114.114.114\\nnameserver 8.8.8.8\\n";
             executeSuCommand("echo -e \"" + dnsContent + "\" > " + resolvPath + " && chmod 644 " + resolvPath);
@@ -132,9 +133,6 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    /**
-     * 从 assets 提取文件（原样拷贝，不加密）
-     */
     private void extractAssetFile(String assetName, String destPath) {
         try {
             InputStream is = getAssets().open(assetName);
@@ -167,9 +165,9 @@ public class MainActivity extends AppCompatActivity {
     private void initKeyboardListener() {
         scrollView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
             int heightDiff = scrollView.getRootView().getHeight() - scrollView.getHeight();
-            if (heightDiff > 500) { // 键盘弹起
+            if (heightDiff > 500) {
                 updateListHeight(0.15f);
-            } else { // 键盘收起
+            } else {
                 updateListHeight(0.55f);
             }
         });
@@ -280,7 +278,7 @@ public class MainActivity extends AppCompatActivity {
     private void appendOutput(String text, String colorHex) {
         mainHandler.post(() -> {
             tvOutput.append(text);
-            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
+            scrollView.post(() -> scrollView.scrollTo(0, scrollView.getChildAt(0).getHeight())); // 自动滚到底部
         });
     }
 
