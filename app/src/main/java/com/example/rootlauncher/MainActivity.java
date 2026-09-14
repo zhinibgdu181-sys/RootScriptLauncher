@@ -418,7 +418,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // ★ 核心：智能检测 ELF 或 脚本，使用不同的执行策略
+    // ★ 核心：自动检测 ELF 依赖，智能选择运行模式
     // ============================================================
     private void runElfReal(String scriptPath) {
         stopCurrentElf();
@@ -456,19 +456,32 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
+            // 准备 BusyBox（自动检测依赖需要用到 busybox 的 grep 功能）
             if (!extractAndPrepareBusybox()) {
                 appendText("[ELF] APK 内置 BusyBox 初始化失败\n");
                 return;
             }
 
-            // ★ 1. 检测文件类型：是 ELF 还是 脚本？
-            String headerCmd = "head -c 4 " + shellQuote(runtimePath) + " | od -An -tx1";
-            Process headerProcess = new ProcessBuilder(findSu(), "-c", headerCmd).redirectErrorStream(true).start();
-            String headerOutput = readAll(headerProcess.getInputStream()).trim().toLowerCase();
-            headerProcess.waitFor();
-
-            // 判断是否包含 ELF 魔数: 7f 45 4c 46
-            boolean isElfFile = headerOutput.contains("7f 45 4c 46");
+            // ★★★ 核心自动检测逻辑 ★★★
+            // 检查 ELF 文件是否依赖 libandroid.so
+            // 图形界面程序依赖 libandroid.so，控制台脚本则没有
+            boolean usePty = true;
+            try {
+                // 使用 busybox grep -a 扫描二进制文件中是否存在 libandroid.so
+                String grepCmd = shellQuote(RUNTIME_BUSYBOX) + " grep -a -q 'libandroid.so' " + shellQuote(runtimePath);
+                Process grepProcess = new ProcessBuilder(findSu(), "-c", grepCmd).redirectErrorStream(true).start();
+                int grepExit = grepProcess.waitFor();
+                
+                if (grepExit == 0) {
+                    usePty = false; // 找到了 libandroid.so，是图形程序，走直连
+                    appendText("[自动检测] 检测到 libandroid.so，使用直连模式\n");
+                } else {
+                    appendText("[自动检测] 未检测到图形库，使用交互模式 (PTY)\n");
+                }
+            } catch (Exception e) {
+                appendText("[自动检测] 检测失败，默认使用交互模式 (PTY)\n");
+            }
+            // ★★★ 检测结束 ★★★
 
             String suCmd = findSu();
             String elfDir = elf.getParent();
@@ -481,17 +494,14 @@ public class MainActivity extends AppCompatActivity {
                     "cd " + shellQuote(elfDir) + "; ";
 
             String elfCommand = "exec " + shellQuote(elf.getAbsolutePath());
-
-            // ★ 2. 根据文件类型，选择不同的执行方式
             String command;
-            if (isElfFile) {
-                // 如果是 ELF：直接执行，不套 busybox script
-                command = env + elfCommand;
-                appendText("[ELF] 检测到 ELF 文件，直接执行\n");
-            } else {
-                // 如果是脚本：用 busybox script 提供 PTY，支持交互
+
+            if (usePty) {
+                // 交互模式：套 PTY
                 command = env + shellQuote(RUNTIME_BUSYBOX) + " script -q -c " + shellQuote(elfCommand) + " /dev/null";
-                appendText("[ELF] 检测到脚本文件，使用 PTY 执行\n");
+            } else {
+                // 直连模式：直接执行
+                command = env + elfCommand;
             }
 
             appendText("[执行命令]\n" + command + "\n");
@@ -818,4 +828,4 @@ public class MainActivity extends AppCompatActivity {
         stopCurrentElf();
         super.onDestroy();
     }
-}
+                }
