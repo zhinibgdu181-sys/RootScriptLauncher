@@ -1,3 +1,4 @@
+
 package com.example.rootlauncher;
 
 import android.app.AlertDialog;
@@ -245,9 +246,10 @@ public class MainActivity extends AppCompatActivity {
         if (etInput == null) return;
 
         etInput.setOnEditorActionListener((v, actionId, event) -> {
+            // ★★★ 修复：IME_ACTION_RUN 改为有效的 IME_ACTION_SEND ★★★
             boolean enter = actionId == EditorInfo.IME_ACTION_GO ||
                     actionId == EditorInfo.IME_ACTION_DONE ||
-                    actionId == EditorInfo.IME_ACTION_RUN;
+                    actionId == EditorInfo.IME_ACTION_SEND;
 
             if (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
                     && event.getAction() == KeyEvent.ACTION_DOWN) {
