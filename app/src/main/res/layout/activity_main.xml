@@ -64,7 +64,7 @@
         app:layout_constraintHeight_percent="0.70"
         app:layout_constraintTop_toBottomOf="@id/topBar" />
 
-    <!-- 终端输出区：占据剩余的 30% -->
+    <!-- 终端输出区：自动占据剩余 30% -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
