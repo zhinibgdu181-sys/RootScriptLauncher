@@ -1,129 +1,263 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F5F5F5"
-    android:fitsSystemWindows="true">
 
-    <!-- 顶部标题栏 -->
+    android:orientation="vertical"
+    android:background="#000000"
+
+    android:padding="8dp"
+
+    tools:context=".MainActivity">
+
+
+    <!-- ===================================================== -->
+    <!-- 顶部：文件列表 -->
+    <!-- ===================================================== -->
+
     <LinearLayout
-        android:id="@+id/topBar"
+
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="16dp"
-        android:gravity="center_vertical"
-        android:background="#FFFFFF"
-        app:layout_constraintTop_toTopOf="parent">
 
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Root 脚本启动器"
-                android:textSize="22sp"
-                android:textStyle="bold"
-                android:textColor="#333333" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="ROOT SCRIPT LAUNCHER"
-                android:textSize="12sp"
-                android:textColor="#999999" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="作者：cyh 大 sb"
-                android:textSize="12sp"
-                android:textColor="#E53935" />
-        </LinearLayout>
+        android:orientation="vertical"
+
+        android:background="#111111"
+
+        android:padding="6dp">
+
+
+        <!-- 添加文件 -->
 
         <Button
+
             android:id="@+id/btnAdd"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:text="+ 添加"
+
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+
+            android:text="添加 ELF / 脚本"
+
+            android:textSize="14sp"
+
             android:textColor="#FFFFFF"
-            android:backgroundTint="#2196F3" />
+
+            android:backgroundTint="#333333"
+
+            android:minHeight="0dp"
+
+            android:padding="0dp" />
+
+
+        <!-- ELF 列表 -->
+
+        <ListView
+
+            android:id="@+id/lvScripts"
+
+            android:layout_width="match_parent"
+            android:layout_height="120dp"
+
+            android:layout_marginTop="5dp"
+
+            android:background="#000000"
+
+            android:divider="#333333"
+
+            android:dividerHeight="1dp"
+
+            android:overScrollMode="never"
+
+            android:scrollbars="vertical" />
+
     </LinearLayout>
 
-    <!-- 脚本列表：占 45% 高度，稍微收敛一点 -->
-    <ListView
-        android:id="@+id/lvScripts"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_margin="8dp"
-        android:divider="@null"
-        android:dividerHeight="8dp"
-        android:background="@android:color/transparent"
-        app:layout_constraintHeight_percent="0.45"
-        app:layout_constraintTop_toBottomOf="@id/topBar" />
 
-    <!-- 终端输出区：占据剩下的 55%，空间更充裕 -->
-    <ScrollView
-        android:id="@+id/scrollView"
+    <!-- ===================================================== -->
+    <!-- 中间：终端输出 -->
+    <!-- ===================================================== -->
+
+    <LinearLayout
+
         android:layout_width="match_parent"
+
         android:layout_height="0dp"
-        android:layout_marginTop="8dp"
-        android:background="#111111"
-        app:layout_constraintBottom_toTopOf="@+id/bottomBar"
-        app:layout_constraintTop_toBottomOf="@id/lvScripts">
+
+        android:layout_weight="1"
+
+        android:layout_marginTop="6dp"
+
+        android:orientation="vertical"
+
+        android:background="#000000">
+
 
         <TextView
-            android:id="@+id/tvOutput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textColor="#00FF00"
-            android:textSize="13sp"
-            android:padding="12dp"
-            android:text="请点击上方「+ 添加」选择脚本。\n" />
-    </ScrollView>
 
-    <!-- 底部输入区 -->
+            android:layout_width="match_parent"
+            android:layout_height="30dp"
+
+            android:gravity="center_vertical"
+
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+
+            android:text="终端"
+
+            android:textColor="#AAAAAA"
+            android:textSize="13sp"
+
+            android:background="#151515" />
+
+
+        <!-- ================================================= -->
+        <!-- 真正的终端输出区域 -->
+        <!-- ================================================= -->
+
+        <ScrollView
+
+            android:id="@+id/scrollView"
+
+            android:layout_width="match_parent"
+
+            android:layout_height="0dp"
+
+            android:layout_weight="1"
+
+            android:background="#000000"
+
+            android:fillViewport="true"
+
+            android:overScrollMode="never"
+
+            android:scrollbars="vertical">
+
+
+            <TextView
+
+                android:id="@+id/tvOutput"
+
+                android:layout_width="match_parent"
+
+                android:layout_height="wrap_content"
+
+                android:minHeight="match_parent"
+
+                android:padding="10dp"
+
+                android:text=""
+
+                android:textColor="#FFFFFF"
+
+                android:textSize="14sp"
+
+                android:fontFamily="monospace"
+
+                android:lineSpacingExtra="2dp"
+
+                android:gravity="top|start"
+
+                android:textIsSelectable="true" />
+
+        </ScrollView>
+
+    </LinearLayout>
+
+
+    <!-- ===================================================== -->
+    <!-- 底部：输入区域 -->
+    <!-- ===================================================== -->
+
     <LinearLayout
-        android:id="@+id/bottomBar"
+
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        android:background="#1A1A1A"
-        android:gravity="center_vertical"
-        app:layout_constraintBottom_toBottomOf="parent">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="$"
-            android:textColor="#00FF00"
-            android:textSize="18sp"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp" />
+        android:layout_marginTop="6dp"
+
+        android:orientation="horizontal"
+
+        android:gravity="center_vertical"
+
+        android:background="#151515"
+
+        android:padding="5dp">
+
+
+        <!-- 输入框 -->
 
         <EditText
+
             android:id="@+id/etInput"
+
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+
+            android:layout_height="48dp"
+
             android:layout_weight="1"
-            android:hint="输入命令 / 选项后回车"
+
+            android:background="#222222"
+
+            android:hint="输入命令 / ELF 输入"
+
+            android:hintTextColor="#777777"
+
             android:textColor="#FFFFFF"
-            android:textColorHint="#666666"
-            android:backgroundTint="#333333"
-            android:inputType="text" />
+
+            android:textColorHighlight="#555555"
+
+            android:textSize="15sp"
+
+            android:fontFamily="monospace"
+
+            android:singleLine="true"
+
+            android:imeOptions="actionSend"
+
+            android:inputType="text"
+
+            android:paddingStart="12dp"
+
+            android:paddingEnd="12dp"
+
+            android:paddingTop="0dp"
+
+            android:paddingBottom="0dp" />
+
+
+        <!-- 发送 -->
 
         <Button
+
             android:id="@+id/btnSend"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+
+            android:layout_width="72dp"
+
+            android:layout_height="48dp"
+
+            android:layout_marginStart="6dp"
+
             android:text="发送"
-            android:layout_marginStart="8dp"
-            android:backgroundTint="#2196F3"
-            android:textColor="#FFFFFF" />
+
+            android:textSize="14sp"
+
+            android:textColor="#FFFFFF"
+
+            android:backgroundTint="#333333"
+
+            android:minHeight="0dp"
+
+            android:minWidth="0dp"
+
+            android:padding="0dp" />
+
     </LinearLayout>
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+
+</LinearLayout>
+
+
