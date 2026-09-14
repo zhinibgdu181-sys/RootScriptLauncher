@@ -1,2381 +1,702 @@
-package com.example.rootlauncher;
-
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.Intent;
-import android.database.Cursor;
-import android.graphics.Rect;
-import android.net.Uri;
-import android.os.Bundle;
-import android.provider.OpenableColumns;
-import android.view.LayoutInflater;
-import android.view.View;
-import android.view.ViewGroup;
-import android.view.WindowManager;
-import android.widget.ArrayAdapter;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.ListView;
-import android.widget.ScrollView;
-import android.widget.TextView;
-
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.NonNull;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.constraintlayout.widget.ConstraintLayout;
-
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Set;
-
-public class MainActivity extends AppCompatActivity {
-
-    private TextView tvOutput;
-    private EditText etInput;
-    private ScrollView scrollView;
-    private ListView lvScripts;
-
-    private final ArrayList<String> scriptList = new ArrayList<>();
-    private ScriptAdapter adapter;
-
-    private volatile Process process;
-    private volatile BufferedWriter writer;
-    private volatile boolean elfRunning = false;
-
-    private volatile String pendingScriptPath = null;
-
-    private android.content.SharedPreferences prefs;
-
-    private File busyboxFile;
-
-    private boolean keyboardVisible = false;
-
-    private static final int SCRIPT_LIST_KEYBOARD_DP = 120;
-
-    private static final String BUILTIN_KAIROS =
-            "Kairos_Driver_Loader_Release_90f76e9.sh";
-
-    private static final String BUILTIN_TIME =
-            "TIME_Cloud_Loader_Release_1732727.sh";
-
-    private static final String BUSYBOX_ASSET =
-            "busybox";
-
-    private static final String RUNTIME_DIR =
-            "/data/local/tmp/com.example.rootlauncher/files";
-
-    private static final String RUNTIME_BUSYBOX =
-            RUNTIME_DIR + "/busybox";
-
-    private final ActivityResultLauncher<Intent> filePickerLauncher =
-            registerForActivityResult(
-                    new ActivityResultContracts.StartActivityForResult(),
-                    result -> {
-
-                        if (result.getResultCode()
-                                != Activity.RESULT_OK) {
-                            return;
-                        }
-
-                        if (result.getData() == null) {
-                            return;
-                        }
-
-                        Uri uri = result.getData().getData();
-
-                        if (uri == null) {
-                            return;
-                        }
-
-                        String displayName = getFileName(uri);
-
-                        if (displayName == null
-                                || displayName.length() == 0) {
-
-                            displayName =
-                                    "script_"
-                                            + System.currentTimeMillis()
-                                            + ".sh";
-                        }
-
-                        final String finalDisplayName =
-                                sanitizeFileName(displayName);
-
-                        new Thread(() -> {
-
-                            File tempFile = null;
-
-                            try {
-
-                                tempFile =
-                                        new File(
-                                                getFilesDir(),
-                                                "import_"
-                                                        + System.currentTimeMillis()
-                                                        + "_"
-                                                        + finalDisplayName
-                                        );
-
-                                InputStream is =
-                                        getContentResolver()
-                                                .openInputStream(uri);
-
-                                if (is == null) {
-
-                                    appendText(
-                                            "[添加失败] 无法读取文件\n"
-                                    );
-
-                                    return;
-                                }
-
-                                FileOutputStream fos =
-                                        new FileOutputStream(tempFile);
-
-                                byte[] buffer = new byte[8192];
-
-                                int len;
-
-                                while ((len = is.read(buffer)) > 0) {
-
-                                    fos.write(
-                                            buffer,
-                                            0,
-                                            len
-                                    );
-                                }
-
-                                is.close();
-                                fos.close();
-
-                                if (!tempFile.exists()
-                                        || tempFile.length() == 0) {
-
-                                    appendText(
-                                            "[添加失败] 文件为空\n"
-                                    );
-
-                                    return;
-                                }
-
-                                appendText(
-                                        "[+] 文件已读取："
-                                                + finalDisplayName
-                                                + "\n"
-                                                + "[+] 大小："
-                                                + tempFile.length()
-                                                + " bytes\n"
-                                );
-
-                                if (!checkRoot()) {
-
-                                    appendText(
-                                            "[添加失败] 当前没有 Root 权限\n"
-                                    );
-
-                                    return;
-                                }
-
-                                if (!prepareRuntimeDir()) {
-
-                                    appendText(
-                                            "[添加失败] 无法创建运行目录\n"
-                                    );
-
-                                    return;
-                                }
-
-                                String runtimePath =
-                                        RUNTIME_DIR
-                                                + "/"
-                                                + finalDisplayName;
-
-                                if (!copyFileAsRoot(
-                                        tempFile.getAbsolutePath(),
-                                        runtimePath
-                                )) {
-
-                                    appendText(
-                                            "[添加失败] 无法复制到运行目录\n"
-                                    );
-
-                                    return;
-                                }
-
-                                if (!chmod755(runtimePath)) {
-
-                                    appendText(
-                                            "[添加失败] chmod 755 失败\n"
-                                    );
-
-                                    return;
-                                }
-
-                                String magic =
-                                        readFileMagicAsRoot(
-                                                runtimePath
-                                        );
-
-                                if (magic != null) {
-
-                                    appendText(
-                                            "[+] 文件头："
-                                                    + magic
-                                                    + "\n"
-                                    );
-
-                                    if (magic.startsWith(
-                                            "7f 45 4c 46"
-                                    )) {
-
-                                        appendText(
-                                                "[+] 检测到 ELF 文件\n"
-                                        );
-
-                                    } else {
-
-                                        appendText(
-                                                "[!] 注意：文件头不是标准 ELF\n"
-                                        );
-                                    }
-                                }
-
-                                synchronized (scriptList) {
-
-                                    if (!scriptList.contains(
-                                            runtimePath
-                                    )) {
-
-                                        scriptList.add(runtimePath);
-                                    }
-                                }
-
-                                saveScripts();
-
-                                final String addedName =
-                                        finalDisplayName;
-
-                                runOnUiThread(() -> {
-
-                                    if (adapter != null) {
-
-                                        adapter.notifyDataSetChanged();
-                                    }
-
-                                    appendText(
-                                            "[+] 已添加："
-                                                    + addedName
-                                                    + "\n"
-                                    );
-                                });
-
-                            } catch (Exception e) {
-
-                                appendText(
-                                        "[添加文件失败] "
-                                                + safeMessage(e)
-                                                + "\n"
-                                );
-
-                            } finally {
-
-                                if (tempFile != null) {
-
-                                    try {
-
-                                        if (tempFile.exists()) {
-
-                                            tempFile.delete();
-                                        }
-
-                                    } catch (Exception ignored) {
-                                    }
-                                }
-                            }
-
-                        }).start();
-                    }
-            );
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-
-        super.onCreate(savedInstanceState);
-
-        getWindow().setSoftInputMode(
-                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-        );
-
-        setContentView(R.layout.activity_main);
-
-        tvOutput = findViewById(R.id.tvOutput);
-        etInput = findViewById(R.id.etInput);
-        scrollView = findViewById(R.id.scrollView);
-        lvScripts = findViewById(R.id.lvScripts);
-
-        Button btnAdd = findViewById(R.id.btnAdd);
-        Button btnSend = findViewById(R.id.btnSend);
-
-        prefs =
-                getSharedPreferences(
-                        "script_prefs",
-                        MODE_PRIVATE
-                );
-
-        Set<String> savedScripts =
-                prefs.getStringSet(
-                        "scripts",
-                        new HashSet<>()
-                );
-
-        synchronized (scriptList) {
-
-            for (String savedPath : savedScripts) {
-
-                String normalized =
-                        normalizeSavedPath(savedPath);
-
-                if (normalized != null
-                        && !scriptList.contains(normalized)) {
-
-                    scriptList.add(normalized);
-                }
-            }
-        }
-
-        addBuiltinScript(BUILTIN_KAIROS);
-        addBuiltinScript(BUILTIN_TIME);
-
-        adapter = new ScriptAdapter();
-
-        lvScripts.setAdapter(adapter);
-
-        setupKeyboardListener();
-
-        new Thread(() -> {
-
-            if (!checkRoot()) {
-
-                showRootDialog();
-
-                return;
-            }
-
-            appendText(
-                    "[+] Root 权限正常\n"
-            );
-
-            if (prepareRuntimeDir()) {
-
-                appendText(
-                        "[+] 运行目录正常：\n"
-                                + RUNTIME_DIR
-                                + "\n"
-                );
-
-            } else {
-
-                appendText(
-                        "[!] 运行目录创建失败\n"
-                );
-            }
-
-            installBuiltinAsset(BUILTIN_KAIROS);
-            installBuiltinAsset(BUILTIN_TIME);
-
-        }).start();
-
-        btnAdd.setOnClickListener(v -> {
-
-            Intent intent =
-                    new Intent(
-                            Intent.ACTION_GET_CONTENT
-                    );
-
-            intent.setType("*/*");
-
-            intent.addCategory(
-                    Intent.CATEGORY_OPENABLE
-            );
-
-            filePickerLauncher.launch(intent);
-        });
-
-        btnSend.setOnClickListener(v -> {
-
-            String input =
-                    etInput.getText().toString();
-
-            if (input.trim().isEmpty()) {
-
-                return;
-            }
-
-            if (elfRunning
-                    && process != null
-                    && writer != null) {
-
-                sendInputToElf(input);
-
-            } else {
-
-                executeCommand(input);
-            }
-        });
-    }
-
-    private void setupKeyboardListener() {
-
-        final View rootView =
-                findViewById(android.R.id.content);
-
-        rootView.getViewTreeObserver()
-                .addOnGlobalLayoutListener(() -> {
-
-                    if (lvScripts == null) {
-
-                        return;
-                    }
-
-                    Rect visibleRect = new Rect();
-
-                    rootView.getWindowVisibleDisplayFrame(
-                            visibleRect
-                    );
-
-                    int rootHeight =
-                            rootView.getRootView().getHeight();
-
-                    int visibleHeight =
-                            visibleRect.bottom
-                                    - visibleRect.top;
-
-                    int keyboardHeight =
-                            rootHeight
-                                    - visibleHeight;
-
-                    boolean nowVisible =
-                            keyboardHeight
-                                    > rootHeight * 0.15f;
-
-                    if (nowVisible == keyboardVisible) {
-
-                        return;
-                    }
-
-                    keyboardVisible = nowVisible;
-
-                    setScriptListKeyboardMode(
-                            keyboardVisible
-                    );
-                });
-    }
-
-    private void setScriptListKeyboardMode(
-            boolean keyboardMode
-    ) {
-
-        if (lvScripts == null) {
-
-            return;
-        }
-
-        ViewGroup.LayoutParams rawParams =
-                lvScripts.getLayoutParams();
-
-        if (!(rawParams instanceof
-                ConstraintLayout.LayoutParams)) {
-
-            return;
-        }
-
-        ConstraintLayout.LayoutParams params =
-                (ConstraintLayout.LayoutParams)
-                        rawParams;
-
-        if (keyboardMode) {
-
-            params.height =
-                    dpToPx(
-                            SCRIPT_LIST_KEYBOARD_DP
-                    );
-
-            params.matchConstraintPercentHeight =
-                    -1f;
-
+/*
+ * 通用 ELF 执行核心
+ *
+ * 支持：
+ *   ELF32 / ELF64
+ *   ET_EXEC / ET_DYN
+ *   动态 ELF / 静态 ELF
+ *   ARM / ARM64 / x86 / x86_64
+ *
+ * 不使用 Process.pid()
+ * 不使用 BusyBox PTY 包装 ELF
+ */
+
+private static final int ELFCLASS32 = 1;
+private static final int ELFCLASS64 = 2;
+
+private static final int ET_EXEC = 2;
+private static final int ET_DYN  = 3;
+
+private static final int EM_386    = 3;
+private static final int EM_ARM    = 40;
+private static final int EM_X86_64 = 62;
+private static final int EM_AARCH64 = 183;
+
+private static final int PT_INTERP = 3;
+
+private static class ElfInfo {
+    boolean valid;
+    boolean elf64;
+    boolean dynamic;
+    boolean hasInterp;
+
+    int type;
+    int machine;
+
+    String machineName;
+    String interpreter;
+
+    String description() {
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("ELF").append(elf64 ? "64" : "32");
+        sb.append(" ");
+
+        if (type == ET_EXEC) {
+            sb.append("ET_EXEC");
+        } else if (type == ET_DYN) {
+            sb.append("ET_DYN");
         } else {
-
-            params.height = 0;
-
-            params.matchConstraintPercentHeight =
-                    0.55f;
+            sb.append("TYPE=").append(type);
         }
 
-        lvScripts.setLayoutParams(params);
+        sb.append(", ").append(machineName);
 
-        lvScripts.requestLayout();
-
-        if (keyboardMode
-                && scrollView != null) {
-
-            scrollView.post(() ->
-                    scrollView.fullScroll(
-                            View.FOCUS_DOWN
-                    )
-            );
+        if (dynamic) {
+            sb.append(", dynamic");
+        } else {
+            sb.append(", static");
         }
+
+        if (hasInterp) {
+            sb.append(", interpreter=");
+            sb.append(interpreter);
+        }
+
+        return sb.toString();
     }
+}
 
-    private int dpToPx(int dp) {
 
-        return (int) (
-                dp
-                        * getResources()
-                        .getDisplayMetrics()
-                        .density
-                        + 0.5f
-        );
-    }
+/**
+ * 从 ELF 文件头读取基本信息。
+ *
+ * 通过 root shell 的 od 读取，不依赖 Java 的 ELF 库。
+ */
+private ElfInfo inspectElf(String path) {
+    ElfInfo info = new ElfInfo();
 
-    private void addBuiltinScript(
-            String assetName
-    ) {
+    try {
+        Process p = new ProcessBuilder(
+                findSu(),
+                "-c",
+                "od -An -tx1 -N64 '" + shellQuote(path) + "'"
+        ).redirectErrorStream(true).start();
 
-        String runtimePath =
-                RUNTIME_DIR
-                        + "/"
-                        + assetName;
-
-        synchronized (scriptList) {
-
-            if (!scriptList.contains(runtimePath)) {
-
-                scriptList.add(runtimePath);
-            }
-        }
-
-        saveScripts();
-    }
-
-    private boolean installBuiltinAsset(
-            String assetName
-    ) {
-
-        File tempFile =
-                new File(
-                        getFilesDir(),
-                        "builtin_" + assetName
-                );
-
-        try {
-
-            if (!prepareRuntimeDir()) {
-
-                return false;
-            }
-
-            appendText(
-                    "[内置文件] 安装："
-                            + assetName
-                            + "\n"
-            );
-
-            InputStream is =
-                    getAssets().open(assetName);
-
-            FileOutputStream fos =
-                    new FileOutputStream(tempFile);
-
-            byte[] buffer = new byte[8192];
-
-            int len;
-
-            while ((len = is.read(buffer)) > 0) {
-
-                fos.write(
-                        buffer,
-                        0,
-                        len
-                );
-            }
-
-            is.close();
-            fos.close();
-
-            if (!tempFile.exists()
-                    || tempFile.length() == 0) {
-
-                appendText(
-                        "[内置文件] 文件为空："
-                                + assetName
-                                + "\n"
-                );
-
-                return false;
-            }
-
-            appendText(
-                    "[内置文件] 大小："
-                            + tempFile.length()
-                            + " bytes\n"
-            );
-
-            String runtimePath =
-                    RUNTIME_DIR
-                            + "/"
-                            + assetName;
-
-            if (!copyFileAsRoot(
-                    tempFile.getAbsolutePath(),
-                    runtimePath
-            )) {
-
-                appendText(
-                        "[内置文件] Root 复制失败："
-                                + assetName
-                                + "\n"
-                );
-
-                return false;
-            }
-
-            if (!chmod755(runtimePath)) {
-
-                appendText(
-                        "[内置文件] chmod 失败："
-                                + assetName
-                                + "\n"
-                );
-
-                return false;
-            }
-
-            appendText(
-                    "[+] 内置文件安装完成："
-                            + runtimePath
-                            + "\n"
-            );
-
-            return true;
-
-        } catch (Exception e) {
-
-            appendText(
-                    "[内置文件] 安装异常："
-                            + assetName
-                            + "\n"
-                            + safeMessage(e)
-                            + "\n"
-            );
-
-            return false;
-
-        } finally {
-
-            try {
-
-                if (tempFile.exists()) {
-
-                    tempFile.delete();
-                }
-
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    private void sendInputToElf(
-            String input
-    ) {
-
-        try {
-
-            BufferedWriter currentWriter = writer;
-            Process currentProcess = process;
-
-            if (currentWriter == null
-                    || currentProcess == null
-                    || !elfRunning) {
-
-                appendText(
-                        "[输入通道尚未建立]\n"
-                );
-
-                return;
-            }
-
-            currentWriter.write(input);
-            currentWriter.newLine();
-            currentWriter.flush();
-
-            runOnUiThread(() ->
-                    etInput.setText("")
-            );
-
-        } catch (Exception e) {
-
-            appendText(
-                    "[ELF 输入失败] "
-                            + safeMessage(e)
-                            + "\n"
-            );
-        }
-    }
-
-    private void executeCommand(
-            String cmd
-    ) {
-
-        if (cmd == null
-                || cmd.trim().isEmpty()) {
-
-            return;
-        }
-
-        final String command = cmd.trim();
-
-        appendText(
-                "$ "
-                        + command
-                        + "\n"
+        BufferedReader br = new BufferedReader(
+                new InputStreamReader(p.getInputStream())
         );
 
-        runOnUiThread(() ->
-                etInput.setText("")
-        );
+        StringBuilder out = new StringBuilder();
+        String line;
 
-        new Thread(() -> {
+        while ((line = br.readLine()) != null) {
+            out.append(line).append(" ");
+        }
 
-            try {
+        p.waitFor();
 
-                String finalCmd =
-                        buildEnvironmentCommand(command);
+        String hex = out.toString()
+                .trim()
+                .replaceAll("\\s+", " ");
 
-                appendText(
-                        "[执行]\n"
-                                + finalCmd
-                                + "\n"
-                );
+        if (hex.length() < 8) {
+            return info;
+        }
 
-                ProcessBuilder pb =
-                        new ProcessBuilder(
-                                findSu(),
-                                "-c",
-                                finalCmd
-                        );
+        String[] b = hex.split(" ");
 
-                pb.redirectErrorStream(true);
+        if (b.length < 20) {
+            return info;
+        }
 
-                Process p = pb.start();
+        // ELF magic
+        if (!"7f".equalsIgnoreCase(b[0])
+                || !"45".equalsIgnoreCase(b[1])
+                || !"4c".equalsIgnoreCase(b[2])
+                || !"46".equalsIgnoreCase(b[3])) {
+            return info;
+        }
 
-                BufferedReader reader =
-                        new BufferedReader(
-                                new InputStreamReader(
-                                        p.getInputStream(),
-                                        StandardCharsets.UTF_8
-                                )
-                        );
+        int clazz = hexByte(b[4]);
+        int data = hexByte(b[5]);
 
-                char[] buffer = new char[1024];
+        if (clazz != ELFCLASS32 && clazz != ELFCLASS64) {
+            return info;
+        }
 
-                int count;
+        // 当前 Android 常见 ELF 基本按 little endian 处理。
+        if (data != 1) {
+            appendText("[!] ELF 是大端序，Android linker 通常无法直接加载\n");
+            return info;
+        }
 
-                while ((count =
-                        reader.read(buffer)) != -1) {
+        info.valid = true;
+        info.elf64 = clazz == ELFCLASS64;
 
-                    if (count <= 0) {
+        // e_type offset 16
+        int type = little16(b, 16);
+        info.type = type;
 
-                        continue;
+        // e_machine offset 18
+        int machine = little16(b, 18);
+        info.machine = machine;
+
+        switch (machine) {
+            case EM_AARCH64:
+                info.machineName = "AArch64";
+                break;
+
+            case EM_ARM:
+                info.machineName = "ARM";
+                break;
+
+            case EM_X86_64:
+                info.machineName = "x86_64";
+                break;
+
+            case EM_386:
+                info.machineName = "x86";
+                break;
+
+            default:
+                info.machineName = "machine=" + machine;
+                break;
+        }
+
+        /*
+         * 是否有 PT_INTERP。
+         *
+         * ELF64:
+         *   e_phoff  = offset 32
+         *   e_phentsize = offset 54
+         *   e_phnum = offset 56
+         *
+         * ELF32:
+         *   e_phoff  = offset 28
+         *   e_phentsize = offset 42
+         *   e_phnum = offset 44
+         */
+        long phoff;
+        int phentsize;
+        int phnum;
+
+        if (info.elf64) {
+            phoff = little64(b, 32);
+            phentsize = little16(b, 54);
+            phnum = little16(b, 56);
+        } else {
+            phoff = little32(b, 28);
+            phentsize = little16(b, 42);
+            phnum = little16(b, 44);
+        }
+
+        /*
+         * 对于程序头数量比较大的 ELF，不直接在 Java 里猜。
+         * 通过 root + readelf/od 后面继续判断。
+         */
+        if (phoff > 0 && phnum > 0 && phnum < 128
+                && phentsize > 0 && phentsize < 256) {
+
+            String cmd;
+
+            if (info.elf64) {
+                cmd =
+                        "dd if='" + shellQuote(path)
+                        + "' bs=1 skip=" + phoff
+                        + " count=" + (phentsize * phnum)
+                        + " 2>/dev/null | od -An -tx1";
+            } else {
+                cmd =
+                        "dd if='" + shellQuote(path)
+                        + "' bs=1 skip=" + phoff
+                        + " count=" + (phentsize * phnum)
+                        + " 2>/dev/null | od -An -tx1";
+            }
+
+            String ph = rootCommandOutput(cmd);
+
+            if (ph != null && !ph.isEmpty()) {
+                String[] pb = ph.trim()
+                        .replaceAll("\\s+", " ")
+                        .split(" ");
+
+                int interpTypeSize = 4;
+
+                for (int i = 0;
+                     i + interpTypeSize <= pb.length;
+                     i += phentsize) {
+
+                    if (i + 4 > pb.length) {
+                        break;
                     }
 
-                    String raw =
-                            new String(
-                                    buffer,
-                                    0,
-                                    count
-                            );
+                    int pType = little32(pb, i);
 
-                    String clean =
-                            cleanElfOutput(raw);
-
-                    if (!clean.isEmpty()) {
-
-                        appendText(clean);
+                    if (pType == PT_INTERP) {
+                        info.hasInterp = true;
+                        break;
                     }
                 }
-
-                int exitCode = p.waitFor();
-
-                appendText(
-                        "\n[exit "
-                                + exitCode
-                                + "]\n"
-                );
-
-            } catch (Exception e) {
-
-                appendText(
-                        "\n[执行失败] "
-                                + safeMessage(e)
-                                + "\n"
-                );
-            }
-
-        }).start();
-    }
-
-    private String buildEnvironmentCommand(
-            String command
-    ) {
-
-        return
-                "export PATH="
-                        + shellQuote(
-                                RUNTIME_DIR
-                                        + ":/data/local/tmp"
-                                        + ":/system/bin"
-                                        + ":/system/xbin"
-                                        + ":/vendor/bin"
-                        )
-                        + ":$PATH; "
-                        + "export HOME="
-                        + shellQuote(RUNTIME_DIR)
-                        + "; "
-                        + "export TMPDIR="
-                        + shellQuote(RUNTIME_DIR)
-                        + "; "
-                        + command;
-    }
-
-    private String findSu() {
-
-        String[] suPaths = {
-
-                "/system/bin/su",
-                "/system/xbin/su",
-                "/sbin/su",
-                "/debug_ramdisk/su"
-        };
-
-        for (String path : suPaths) {
-
-            if (new File(path).exists()) {
-
-                return path;
             }
         }
 
-        return "su";
-    }
+        /*
+         * 最可靠的判断：
+         * 如果文件包含 .interp / PT_INTERP，就是动态 ELF。
+         *
+         * 对当前 Android ELF 来说：
+         *   PT_INTERP 存在 -> linker
+         *   PT_INTERP 不存在 -> 直接 exec
+         */
+        info.dynamic = info.hasInterp;
 
-    private boolean checkRoot() {
+        /*
+         * 再用 strings/grep 尝试获取 interpreter。
+         */
+        if (info.hasInterp) {
+            String interp = rootCommandOutput(
+                    "readelf -l '" + shellQuote(path)
+                    + "' 2>/dev/null | grep -A1 INTERP"
+            );
 
-        try {
+            if (interp != null) {
+                if (interp.contains("/system/bin/linker64")) {
+                    info.interpreter = "/system/bin/linker64";
+                } else if (interp.contains("/system/bin/linker")) {
+                    info.interpreter = "/system/bin/linker";
+                } else if (interp.contains("/apex/")) {
+                    /*
+                     * Android 某些 ELF 可能使用 APEX linker。
+                     * 这种情况下不要硬编码成 linker64。
+                     */
+                    String[] lines = interp.split("\\n");
 
-            Process p =
-                    new ProcessBuilder(
-                            findSu(),
-                            "-c",
-                            "id"
-                    )
-                            .redirectErrorStream(true)
-                            .start();
+                    for (String s : lines) {
+                        if (s.contains("/apex/")
+                                && s.contains("linker")) {
+                            int idx = s.indexOf("/apex/");
 
-            String output =
-                    readAll(
-                            p.getInputStream()
-                    );
+                            if (idx >= 0) {
+                                String x = s.substring(idx).trim();
+                                int end = x.indexOf(" ");
 
-            int exitCode =
-                    p.waitFor();
+                                if (end > 0) {
+                                    x = x.substring(0, end);
+                                }
 
-            return exitCode == 0
-                    && output != null
-                    && output.contains("uid=0");
-
-        } catch (Exception e) {
-
-            return false;
-        }
-    }
-
-    private void showRootDialog() {
-
-        runOnUiThread(() -> {
-
-            if (isFinishing()
-                    || isDestroyed()) {
-
-                return;
-            }
-
-            new AlertDialog.Builder(
-                    MainActivity.this
-            )
-                    .setTitle("需要 Root 权限")
-                    .setMessage(
-                            "本软件需要 Root 权限才能执行 ELF。\n\n"
-                                    + "请在 KernelSU / Magisk 中允许本应用，"
-                                    + "然后点击「重试」。"
-                    )
-                    .setPositiveButton(
-                            "重试",
-                            (dialog, which) -> {
-
-                                new Thread(() -> {
-
-                                    if (checkRoot()) {
-
-                                        appendText(
-                                                "[+] Root 权限已恢复\n"
-                                        );
-
-                                        prepareRuntimeDir();
-
-                                        String path =
-                                                pendingScriptPath;
-
-                                        pendingScriptPath = null;
-
-                                        if (path != null) {
-
-                                            runElfReal(path);
-                                        }
-
-                                    } else {
-
-                                        showRootDialog();
-                                    }
-
-                                }).start();
+                                info.interpreter = x;
+                                break;
                             }
-                    )
-                    .setNegativeButton(
-                            "退出",
-                            (dialog, which) ->
-                                    finish()
-                    )
-                    .setCancelable(false)
-                    .show();
-        });
-    }
-
-    private String shellQuote(
-            String value
-    ) {
-
-        if (value == null) {
-
-            return "''";
-        }
-
-        return "'"
-                + value.replace(
-                        "'",
-                        "'\\''"
-                )
-                + "'";
-    }
-
-    private void runElf(
-            String scriptPath
-    ) {
-
-        new Thread(() -> {
-
-            if (!checkRoot()) {
-
-                pendingScriptPath = scriptPath;
-
-                appendText(
-                        "[ELF] 没有 Root，等待授权\n"
-                );
-
-                showRootDialog();
-
-                return;
-            }
-
-            runElfReal(scriptPath);
-
-        }).start();
-    }
-
-    private void runElfReal(
-            String scriptPath
-    ) {
-
-        stopCurrentElf();
-
-        try {
-
-            if (!checkRoot()) {
-
-                pendingScriptPath = scriptPath;
-
-                appendText(
-                        "[ELF] Root 权限丢失\n"
-                );
-
-                showRootDialog();
-
-                return;
-            }
-
-            if (!prepareRuntimeDir()) {
-
-                appendText(
-                        "[ELF] 无法创建运行目录\n"
-                );
-
-                return;
-            }
-
-            String runtimePath =
-                    normalizeSavedPath(scriptPath);
-
-            if (runtimePath == null) {
-
-                appendText(
-                        "[ELF] 无效路径\n"
-                );
-
-                return;
-            }
-
-            File elf =
-                    new File(runtimePath);
-
-            String fileName =
-                    elf.getName();
-
-            if (BUILTIN_KAIROS.equals(fileName)
-                    || BUILTIN_TIME.equals(fileName)) {
-
-                if (!elf.exists()
-                        || elf.length() == 0) {
-
-                    appendText(
-                            "[ELF] 内置文件不存在，重新安装："
-                                    + fileName
-                                    + "\n"
-                    );
-
-                    if (!installBuiltinAsset(fileName)) {
-
-                        appendText(
-                                "[ELF] 内置文件安装失败\n"
-                        );
-
-                        return;
+                        }
                     }
                 }
             }
 
-            if (!elf.exists()) {
-
-                appendText(
-                        "[ELF] 文件不存在：\n"
-                                + runtimePath
-                                + "\n"
-                );
-
-                return;
-            }
-
-            if (!elf.isFile()) {
-
-                appendText(
-                        "[ELF] 不是普通文件：\n"
-                                + runtimePath
-                                + "\n"
-                );
-
-                return;
-            }
-
-            if (elf.length() == 0) {
-
-                appendText(
-                        "[ELF] 文件大小为 0：\n"
-                                + runtimePath
-                                + "\n"
-                );
-
-                return;
-            }
-
-            appendText(
-                    "\n================================\n"
-            );
-
-            appendText(
-                    "[ELF] 准备启动\n"
-            );
-
-            appendText(
-                    "[ELF] 路径："
-                            + runtimePath
-                            + "\n"
-            );
-
-            appendText(
-                    "[ELF] 大小："
-                            + elf.length()
-                            + " bytes\n"
-            );
-
-            if (!chmod755(runtimePath)) {
-
-                appendText(
-                        "[ELF] chmod 755 失败\n"
-                );
-
-                return;
-            }
-
-            String lsOutput =
-                    rootLs(runtimePath);
-
-            if (lsOutput != null) {
-
-                appendText(
-                        "[ELF] 文件权限："
-                                + lsOutput.trim()
-                                + "\n"
-                );
-            }
-
-            String magic =
-                    readFileMagicAsRoot(runtimePath);
-
-            if (magic != null) {
-
-                appendText(
-                        "[ELF] Magic："
-                                + magic
-                                + "\n"
-                );
-
-                if (!magic.startsWith(
-                        "7f 45 4c 46"
-                )) {
-
-                    appendText(
-                            "[警告] 这个文件不是标准 ELF 文件\n"
-                    );
+            if (info.interpreter == null) {
+                if (info.elf64) {
+                    info.interpreter = "/system/bin/linker64";
+                } else {
+                    info.interpreter = "/system/bin/linker";
                 }
+            }
+        }
+
+    } catch (Throwable e) {
+        appendText("[!] ELF 检测失败："
+                + e.getClass().getSimpleName()
+                + ": "
+                + e.getMessage()
+                + "\n");
+    }
+
+    return info;
+}
+
+
+/**
+ * 通用 ELF 启动。
+ */
+private void runElfReal(final String path) {
+    new Thread(() -> {
+        Process currentProcess = null;
+
+        try {
+            if (path == null || path.trim().isEmpty()) {
+                appendText("[!] ELF 路径为空\n");
+                return;
+            }
+
+            File file = new File(path);
+
+            if (!file.exists()) {
+                appendText("[!] ELF 不存在：\n" + path + "\n");
+                return;
+            }
+
+            if (!file.isFile()) {
+                appendText("[!] 不是普通文件：\n" + path + "\n");
+                return;
+            }
+
+            appendText("\n========== ELF EXEC ==========\n");
+            appendText("[+] 文件：" + path + "\n");
+
+            /*
+             * 由 root 设置执行权限。
+             */
+            String chmodResult = rootCommandOutput(
+                    "chmod 755 '" + shellQuote(path) + "'"
+            );
+
+            if (chmodResult != null && !chmodResult.trim().isEmpty()) {
+                appendText("[chmod] " + chmodResult + "\n");
+            }
+
+            ElfInfo elf = inspectElf(path);
+
+            if (!elf.valid) {
+                appendText("[!] 不是有效 ELF 文件\n");
+                return;
+            }
+
+            appendText("[+] ELF：" + elf.description() + "\n");
+
+            /*
+             * 架构检查。
+             *
+             * 只做提示，不直接阻止未知架构。
+             * 这样某些厂商/特殊 ELF 仍然有机会执行。
+             */
+            String abi = Build.SUPPORTED_ABIS != null
+                    && Build.SUPPORTED_ABIS.length > 0
+                    ? Build.SUPPORTED_ABIS[0]
+                    : "unknown";
+
+            appendText("[+] Android ABI：" + abi + "\n");
+
+            String elfDir = file.getParent();
+
+            if (elfDir == null || elfDir.isEmpty()) {
+                elfDir = "/";
             }
 
             /*
-             * 保留 BusyBox 初始化功能。
+             * 环境。
              *
-             * 但执行 ELF 时不再使用：
-             *
-             * busybox script -q -c ...
-             *
-             * 而是直接 exec ELF。
+             * 不设置一个过于严格的 LD_LIBRARY_PATH，
+             * 防止破坏 Android linker 自己的 namespace。
              */
-            extractAndPrepareBusybox();
+            String runtimeDir = RUNTIME_DIR;
 
-            String elfDir =
-                    elf.getParent();
+            StringBuilder env = new StringBuilder();
 
-            if (elfDir == null) {
+            env.append("export PATH='")
+                    .append(shellQuote(runtimeDir))
+                    .append(":/data/local/tmp:/system/bin:/system/xbin:/vendor/bin:$PATH'; ");
 
-                elfDir = RUNTIME_DIR;
+            env.append("export HOME='")
+                    .append(shellQuote(runtimeDir))
+                    .append("'; ");
+
+            env.append("export TMPDIR='")
+                    .append(shellQuote(runtimeDir))
+                    .append("'; ");
+
+            env.append("cd '")
+                    .append(shellQuote(elfDir))
+                    .append("' || exit 126; ");
+
+            /*
+             * 最关键：
+             *
+             * 1. 动态 ELF：
+             *      让 ELF 自己的 PT_INTERP / Android linker 处理。
+             *
+             * 2. 静态 ELF：
+             *      直接 exec。
+             *
+             * 不使用 busybox script -q -c。
+             */
+            String command;
+
+            if (elf.hasInterp) {
+                appendText("[+] 类型：动态 ELF\n");
+                appendText("[+] 使用 ELF 自带 interpreter\n");
+
+                /*
+                 * 这里仍然优先直接 exec。
+                 *
+                 * Linux kernel 会读取 PT_INTERP，
+                 * Android linker 负责加载动态库。
+                 */
+                command = env.toString()
+                        + "exec '"
+                        + shellQuote(path)
+                        + "'";
+            } else {
+                appendText("[+] 类型：静态 ELF / 无 PT_INTERP\n");
+                appendText("[+] 直接 exec\n");
+
+                command = env.toString()
+                        + "exec '"
+                        + shellQuote(path)
+                        + "'";
             }
 
-            String env =
-                    "export PATH="
-                            + shellQuote(
-                                    RUNTIME_DIR
-                                            + ":/data/local/tmp"
-                                            + ":/system/bin"
-                                            + ":/system/xbin"
-                                            + ":/vendor/bin"
-                            )
-                            + ":$PATH; "
-                            + "export HOME="
-                            + shellQuote(RUNTIME_DIR)
-                            + "; "
-                            + "export TMPDIR="
-                            + shellQuote(RUNTIME_DIR)
-                            + "; "
-                            + "export LD_LIBRARY_PATH="
-                            + shellQuote(
-                                    "/system/lib64:/vendor/lib64"
-                            )
-                            + ":$LD_LIBRARY_PATH; "
-                            + "cd "
-                            + shellQuote(elfDir)
-                            + " || exit 126; ";
+            appendText("[+] 正在启动...\n");
 
-            String elfCommand =
-                    "exec "
-                            + shellQuote(
-                                    elf.getAbsolutePath()
-                            );
-
-            String command =
-                    env
-                            + elfCommand;
-
-            appendText(
-                    "[ELF] linker：/system/bin/linker64\n"
+            ProcessBuilder pb = new ProcessBuilder(
+                    findSu(),
+                    "-c",
+                    command
             );
-
-            appendText(
-                    "[ELF] 执行方式：直接 exec\n"
-            );
-
-            appendText(
-                    "[ELF] Shell command：\n"
-                            + command
-                            + "\n"
-            );
-
-            ProcessBuilder pb =
-                    new ProcessBuilder(
-                            findSu(),
-                            "-c",
-                            command
-                    );
 
             pb.redirectErrorStream(false);
 
-            try {
+            currentProcess = pb.start();
 
-                pb.directory(
-                        new File(elfDir)
-                );
+            process = currentProcess;
+            elfRunning = true;
 
-            } catch (Exception ignored) {
-            }
+            final Process p = currentProcess;
 
-            process = pb.start();
+            writer = new BufferedWriter(
+                    new OutputStreamWriter(
+                            p.getOutputStream()
+                    )
+            );
 
-            final Process currentProcess =
-                    process;
-
-            writer =
-                    new BufferedWriter(
-                            new OutputStreamWriter(
-                                    currentProcess.getOutputStream(),
-                                    StandardCharsets.UTF_8
+            final BufferedReader stdout =
+                    new BufferedReader(
+                            new InputStreamReader(
+                                    p.getInputStream()
                             )
                     );
 
-            elfRunning = true;
-
-            appendText(
-                    "[+] ELF Process 已启动\n"
-            );
-
-            /*
-             * 不再调用 Process.pid()
-             *
-             * Android 的 Process API / 当前项目编译环境
-             * 不保证提供 pid()。
-             */
-            appendText(
-                    "[+] PID：不可用（不影响执行）\n"
-            );
-
-            appendText(
-                    "================================\n\n"
-            );
-
-            Thread stdoutThread =
-                    new Thread(() -> {
-
-                        try {
-
-                            InputStreamReader reader =
-                                    new InputStreamReader(
-                                            currentProcess.getInputStream(),
-                                            StandardCharsets.UTF_8
-                                    );
-
-                            char[] buffer =
-                                    new char[1024];
-
-                            int count;
-
-                            while ((count =
-                                    reader.read(buffer))
-                                    != -1) {
-
-                                if (count <= 0) {
-
-                                    continue;
-                                }
-
-                                String raw =
-                                        new String(
-                                                buffer,
-                                                0,
-                                                count
-                                        );
-
-                                String clean =
-                                        cleanElfOutput(raw);
-
-                                if (!clean.isEmpty()) {
-
-                                    appendText(clean);
-                                }
-                            }
-
-                        } catch (Exception e) {
-
-                            if (elfRunning) {
-
-                                appendText(
-                                        "[stdout 读取失败] "
-                                                + safeMessage(e)
-                                                + "\n"
-                                );
-                            }
-                        }
-
-                    });
-
-            stdoutThread.setName("ELF-stdout");
-
-            Thread stderrThread =
-                    new Thread(() -> {
-
-                        try {
-
-                            InputStreamReader reader =
-                                    new InputStreamReader(
-                                            currentProcess.getErrorStream(),
-                                            StandardCharsets.UTF_8
-                                    );
-
-                            char[] buffer =
-                                    new char[1024];
-
-                            int count;
-
-                            while ((count =
-                                    reader.read(buffer))
-                                    != -1) {
-
-                                if (count <= 0) {
-
-                                    continue;
-                                }
-
-                                String raw =
-                                        new String(
-                                                buffer,
-                                                0,
-                                                count
-                                        );
-
-                                String clean =
-                                        cleanElfOutput(raw);
-
-                                if (!clean.isEmpty()) {
-
-                                    appendText(clean);
-                                }
-                            }
-
-                        } catch (Exception e) {
-
-                            if (elfRunning) {
-
-                                appendText(
-                                        "[stderr 读取失败] "
-                                                + safeMessage(e)
-                                                + "\n"
-                                );
-                            }
-                        }
-
-                    });
-
-            stderrThread.setName("ELF-stderr");
-
-            stdoutThread.start();
-            stderrThread.start();
-
-            new Thread(() -> {
-
-                try {
-
-                    int exitCode =
-                            currentProcess.waitFor();
-
-                    try {
-
-                        stdoutThread.join(1500);
-
-                    } catch (Exception ignored) {
-                    }
-
-                    try {
-
-                        stderrThread.join(1500);
-
-                    } catch (Exception ignored) {
-                    }
-
-                    appendText(
-                            "\n[ELF exit "
-                                    + exitCode
-                                    + "]\n"
+            final BufferedReader stderr =
+                    new BufferedReader(
+                            new InputStreamReader(
+                                    p.getErrorStream()
+                            )
                     );
 
-                } catch (Exception e) {
+            /*
+             * stdout
+             */
+            new Thread(() -> {
+                try {
+                    String line;
+
+                    while ((line = stdout.readLine()) != null) {
+                        appendText(line + "\n");
+                    }
+                } catch (Throwable ignored) {
+                }
+            }, "ELF-stdout").start();
+
+            /*
+             * stderr
+             *
+             * 这个非常重要。
+             *
+             * Kairos 这类 ELF 如果被 linker/kernel/SELinux 拒绝，
+             * 错误一般会从 stderr 出来。
+             */
+            new Thread(() -> {
+                try {
+                    String line;
+
+                    while ((line = stderr.readLine()) != null) {
+                        appendText("[stderr] " + line + "\n");
+                    }
+                } catch (Throwable ignored) {
+                }
+            }, "ELF-stderr").start();
+
+            /*
+             * 等待进程结束。
+             */
+            new Thread(() -> {
+                try {
+                    int code = p.waitFor();
 
                     appendText(
-                            "\n[ELF wait 失败] "
-                                    + safeMessage(e)
+                            "\n[+] ELF 进程结束，exit code = "
+                                    + code
                                     + "\n"
                     );
 
+                } catch (Throwable e) {
+                    appendText(
+                            "\n[!] 等待 ELF 结束失败："
+                                    + e.getMessage()
+                                    + "\n"
+                    );
                 } finally {
+                    elfRunning = false;
 
-                    if (process == currentProcess) {
+                    if (process == p) {
+                        process = null;
+                    }
+
+                    if (writer != null) {
+                        try {
+                            writer.close();
+                        } catch (Throwable ignored) {
+                        }
 
                         writer = null;
-                        process = null;
-                        elfRunning = false;
                     }
-                }
 
+                    appendText("========== EXEC END ==========\n");
+                }
             }, "ELF-waiter").start();
 
-        } catch (Exception e) {
-
-            writer = null;
-            process = null;
+        } catch (Throwable e) {
             elfRunning = false;
 
             appendText(
-                    "\n[ELF 启动失败]\n"
-                            + safeMessage(e)
+                    "[!] ELF 启动异常："
+                            + e.getClass().getName()
                             + "\n"
             );
-        }
-    }
 
-    /*
-     * ============================================================
-     * PID
-     * ============================================================
-     *
-     * 这里故意不调用 Process.pid()。
-     *
-     * 原来的：
-     *
-     *     return p.pid();
-     *
-     * 会导致你的 assembleRelease 编译失败。
-     *
-     * 返回 -1 表示当前环境不提供 PID。
-     * 这不会影响 Process 的启动、输入、输出和终止。
-     */
-    private long getProcessPid(
-            Process p
-    ) {
-
-        return -1L;
-    }
-
-    private void stopCurrentElf() {
-
-        elfRunning = false;
-
-        try {
-
-            BufferedWriter currentWriter = writer;
-
-            if (currentWriter != null) {
-
-                currentWriter.close();
+            if (e.getMessage() != null) {
+                appendText(
+                        "[!] "
+                                + e.getMessage()
+                                + "\n"
+                );
             }
 
-        } catch (Exception ignored) {
+            /*
+             * 不使用 Process.pid()。
+             */
+            if (process != null) {
+                try {
+                    process.destroy();
+                } catch (Throwable ignored) {
+                }
+            }
+
+            process = null;
+        }
+    }, "ELF-launcher").start();
+}
+
+
+/**
+ * shell 单引号转义。
+ *
+ * 注意：
+ * shellQuote(path) 返回的是：
+ * 'xxx'
+ */
+private String shellQuote(String s) {
+    if (s == null) {
+        return "''";
+    }
+
+    return "'" + s.replace("'", "'\\''") + "'";
+}
+
+
+/**
+ * 执行 root command 并读取输出。
+ */
+private String rootCommandOutput(String command) {
+    Process p = null;
+
+    try {
+        p = new ProcessBuilder(
+                findSu(),
+                "-c",
+                command
+        ).redirectErrorStream(true).start();
+
+        BufferedReader br = new BufferedReader(
+                new InputStreamReader(
+                        p.getInputStream()
+                )
+        );
+
+        StringBuilder sb = new StringBuilder();
+
+        String line;
+
+        while ((line = br.readLine()) != null) {
+            sb.append(line).append('\n');
         }
 
-        writer = null;
+        p.waitFor();
 
-        Process currentProcess = process;
+        return sb.toString();
 
-        if (currentProcess != null) {
-
+    } catch (Throwable e) {
+        return "";
+    } finally {
+        if (p != null) {
             try {
-
-                /*
-                 * 不使用 Process.isAlive()。
-                 *
-                 * 通过 exitValue() 判断进程是否已经结束。
-                 */
-                try {
-
-                    currentProcess.exitValue();
-
-                } catch (IllegalThreadStateException stillRunning) {
-
-                    currentProcess.destroy();
-
-                    /*
-                     * 给 destroy 一点时间。
-                     */
-                    try {
-
-                        Thread.sleep(100);
-
-                    } catch (InterruptedException interrupted) {
-
-                        Thread.currentThread().interrupt();
-                    }
-
-                    try {
-
-                        currentProcess.exitValue();
-
-                    } catch (IllegalThreadStateException ignored) {
-
-                        /*
-                         * 如果仍然没有结束，
-                         * 使用 destroyForcibly()。
-                         */
-                        try {
-
-                            currentProcess.destroyForcibly();
-
-                        } catch (Throwable ignored2) {
-                        }
-                    }
-                }
-
+                p.destroy();
             } catch (Throwable ignored) {
             }
         }
+    }
+}
 
-        process = null;
+
+/**
+ * 十六进制 byte。
+ */
+private int hexByte(String s) {
+    return Integer.parseInt(s, 16);
+}
+
+
+/**
+ * ELF little-endian 16 bit。
+ */
+private int little16(String[] b, int off) {
+    if (off + 2 > b.length) {
+        return 0;
     }
 
-    private boolean prepareRuntimeDir() {
+    return hexByte(b[off])
+            | (hexByte(b[off + 1]) << 8);
+}
 
-        try {
 
-            String command =
-                    "mkdir -p "
-                            + shellQuote(RUNTIME_DIR)
-                            + " && chmod 755 "
-                            + shellQuote(RUNTIME_DIR);
-
-            Process p =
-                    new ProcessBuilder(
-                            findSu(),
-                            "-c",
-                            command
-                    )
-                            .redirectErrorStream(true)
-                            .start();
-
-            String output =
-                    readAll(p.getInputStream());
-
-            int exitCode =
-                    p.waitFor();
-
-            if (exitCode != 0) {
-
-                appendText(
-                        "[运行目录创建失败] "
-                                + output
-                                + "\n"
-                );
-
-                return false;
-            }
-
-            return true;
-
-        } catch (Exception e) {
-
-            appendText(
-                    "[运行目录异常] "
-                            + safeMessage(e)
-                            + "\n"
-            );
-
-            return false;
-        }
+/**
+ * ELF little-endian 32 bit。
+ */
+private long little32(String[] b, int off) {
+    if (off + 4 > b.length) {
+        return 0;
     }
 
-    private boolean copyFileAsRoot(
-            String source,
-            String destination
-    ) {
+    return ((long) hexByte(b[off]))
+            | ((long) hexByte(b[off + 1]) << 8)
+            | ((long) hexByte(b[off + 2]) << 16)
+            | ((long) hexByte(b[off + 3]) << 24);
+}
 
-        try {
 
-            String command =
-                    "mkdir -p "
-                            + shellQuote(RUNTIME_DIR)
-                            + "; "
-                            + "cat "
-                            + shellQuote(source)
-                            + " > "
-                            + shellQuote(destination)
-                            + "; "
-                            + "chmod 755 "
-                            + shellQuote(destination);
-
-            Process p =
-                    new ProcessBuilder(
-                            findSu(),
-                            "-c",
-                            command
-                    )
-                            .redirectErrorStream(true)
-                            .start();
-
-            String output =
-                    readAll(p.getInputStream());
-
-            int exitCode =
-                    p.waitFor();
-
-            if (exitCode != 0) {
-
-                appendText(
-                        "[Root复制失败] "
-                                + output
-                                + "\n"
-                );
-
-                return false;
-            }
-
-            File destinationFile =
-                    new File(destination);
-
-            if (!destinationFile.exists()) {
-
-                appendText(
-                        "[Root复制失败] 目标文件不存在\n"
-                                + destination
-                                + "\n"
-                );
-
-                return false;
-            }
-
-            return true;
-
-        } catch (Exception e) {
-
-            appendText(
-                    "[Root复制异常] "
-                            + safeMessage(e)
-                            + "\n"
-            );
-
-            return false;
-        }
+/**
+ * ELF little-endian 64 bit。
+ */
+private long little64(String[] b, int off) {
+    if (off + 8 > b.length) {
+        return 0;
     }
 
-    private boolean chmod755(
-            String path
-    ) {
+    long v = 0;
 
-        try {
-
-            Process p =
-                    new ProcessBuilder(
-                            findSu(),
-                            "-c",
-                            "chmod 755 "
-                                    + shellQuote(path)
-                    )
-                            .redirectErrorStream(true)
-                            .start();
-
-            String output =
-                    readAll(p.getInputStream());
-
-            int exitCode =
-                    p.waitFor();
-
-            if (exitCode != 0) {
-
-                appendText(
-                        "[chmod失败] "
-                                + path
-                                + "\n"
-                                + output
-                                + "\n"
-                );
-
-                return false;
-            }
-
-            return true;
-
-        } catch (Exception e) {
-
-            appendText(
-                    "[chmod异常] "
-                            + safeMessage(e)
-                            + "\n"
-            );
-
-            return false;
-        }
+    for (int i = 0; i < 8; i++) {
+        v |= ((long) hexByte(b[off + i])) << (i * 8);
     }
 
-    private String rootLs(
-            String path
-    ) {
-
-        try {
-
-            Process p =
-                    new ProcessBuilder(
-                            findSu(),
-                            "-c",
-                            "ls -l "
-                                    + shellQuote(path)
-                    )
-                            .redirectErrorStream(true)
-                            .start();
-
-            String output =
-                    readAll(p.getInputStream());
-
-            p.waitFor();
-
-            return output;
-
-        } catch (Exception e) {
-
-            return null;
-        }
-    }
-
-    private String readFileMagicAsRoot(
-            String path
-    ) {
-
-        try {
-
-            String command =
-                    "od -An -tx1 -N 4 "
-                            + shellQuote(path);
-
-            Process p =
-                    new ProcessBuilder(
-                            findSu(),
-                            "-c",
-                            command
-                    )
-                            .redirectErrorStream(true)
-                            .start();
-
-            String output =
-                    readAll(p.getInputStream());
-
-            p.waitFor();
-
-            if (output == null) {
-
-                return null;
-            }
-
-            return output
-                    .trim()
-                    .replaceAll(
-                            "\\s+",
-                            " "
-                    );
-
-        } catch (Exception e) {
-
-            return null;
-        }
-    }
-
-    private boolean extractAndPrepareBusybox() {
-
-        File tempFile =
-                new File(
-                        getFilesDir(),
-                        "busybox_temp"
-                );
-
-        try {
-
-            InputStream is =
-                    getAssets().open(BUSYBOX_ASSET);
-
-            FileOutputStream fos =
-                    new FileOutputStream(tempFile);
-
-            byte[] buffer = new byte[8192];
-
-            int len;
-
-            while ((len = is.read(buffer)) > 0) {
-
-                fos.write(
-                        buffer,
-                        0,
-                        len
-                );
-            }
-
-            is.close();
-            fos.close();
-
-            if (!tempFile.exists()
-                    || tempFile.length() < 100000) {
-
-                appendText(
-                        "[BusyBox] assets/busybox 文件异常\n"
-                );
-
-                return false;
-            }
-
-            if (!prepareRuntimeDir()) {
-
-                return false;
-            }
-
-            String destination =
-                    RUNTIME_BUSYBOX;
-
-            String command =
-                    "cat "
-                            + shellQuote(
-                                    tempFile.getAbsolutePath()
-                            )
-                            + " > "
-                            + shellQuote(destination)
-                            + "; chmod 755 "
-                            + shellQuote(destination);
-
-            Process p =
-                    new ProcessBuilder(
-                            findSu(),
-                            "-c",
-                            command
-                    )
-                            .redirectErrorStream(true)
-                            .start();
-
-            String output =
-                    readAll(p.getInputStream());
-
-            int exit = p.waitFor();
-
-            if (exit != 0) {
-
-                appendText(
-                        "[BusyBox] 安装失败\n"
-                                + output
-                );
-
-                return false;
-            }
-
-            busyboxFile =
-                    new File(RUNTIME_BUSYBOX);
-
-            if (!busyboxFile.exists()
-                    || busyboxFile.length() == 0) {
-
-                appendText(
-                        "[BusyBox] 文件不存在\n"
-                );
-
-                return false;
-            }
-
-            return true;
-
-        } catch (Exception e) {
-
-            appendText(
-                    "[BusyBox] 初始化异常："
-                            + safeMessage(e)
-                            + "\n"
-            );
-
-            return false;
-
-        } finally {
-
-            try {
-
-                if (tempFile.exists()) {
-
-                    tempFile.delete();
-                }
-
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    private boolean hasBusyboxApplet(
-            String appletList,
-            String wanted
-    ) {
-
-        if (appletList == null
-                || wanted == null) {
-
-            return false;
-        }
-
-        String[] applets =
-                appletList.split("\\s+");
-
-        for (String applet : applets) {
-
-            if (wanted.equals(applet.trim())) {
-
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private String readAll(
-            InputStream inputStream
-    ) {
-
-        StringBuilder result =
-                new StringBuilder();
-
-        if (inputStream == null) {
-
-            return "";
-        }
-
-        try {
-
-            InputStreamReader reader =
-                    new InputStreamReader(
-                            inputStream,
-                            StandardCharsets.UTF_8
-                    );
-
-            char[] buffer = new char[1024];
-
-            int count;
-
-            while ((count =
-                    reader.read(buffer)) != -1) {
-
-                if (count > 0) {
-
-                    result.append(
-                            buffer,
-                            0,
-                            count
-                    );
-                }
-            }
-
-        } catch (Exception ignored) {
-        }
-
-        return result.toString();
-    }
-
-    private String cleanElfOutput(
-            String text
-    ) {
-
-        if (text == null
-                || text.length() == 0) {
-
-            return "";
-        }
-
-        text =
-                text.replaceAll(
-                        "\u001B\\[[0-9;?]*[ -/]*[@-~]",
-                        ""
-                );
-
-        text =
-                text.replaceAll(
-                        "\\[(?:[0-9;?]+)m",
-                        ""
-                );
-
-        text =
-                text.replace(
-                        "公益倒卖死全家",
-                        ""
-                );
-
-        return text;
-    }
-
-    private String getFileName(
-            Uri uri
-    ) {
-
-        String result = null;
-
-        if ("content".equals(uri.getScheme())) {
-
-            try (
-                    Cursor cursor =
-                            getContentResolver()
-                                    .query(
-                                            uri,
-                                            null,
-                                            null,
-                                            null,
-                                            null
-                                    )
-            ) {
-
-                if (cursor != null
-                        && cursor.moveToFirst()) {
-
-                    int nameIndex =
-                            cursor.getColumnIndex(
-                                    OpenableColumns.DISPLAY_NAME
-                            );
-
-                    if (nameIndex != -1) {
-
-                        result =
-                                cursor.getString(nameIndex);
-                    }
-                }
-
-            } catch (Exception ignored) {
-            }
-        }
-
-        if (result == null) {
-
-            result = uri.getPath();
-
-            if (result != null) {
-
-                int cut =
-                        result.lastIndexOf('/');
-
-                if (cut != -1) {
-
-                    result =
-                            result.substring(
-                                    cut + 1
-                            );
-                }
-            }
-        }
-
-        return result;
-    }
-
-    private String sanitizeFileName(
-            String name
-    ) {
-
-        if (name == null
-                || name.isEmpty()) {
-
-            return "script_"
-                    + System.currentTimeMillis()
-                    + ".sh";
-        }
-
-        name =
-                name.replace("/", "_");
-
-        name =
-                name.replace("\\", "_");
-
-        name =
-                name.replace("\u0000", "_");
-
-        if (".".equals(name)
-                || "..".equals(name)) {
-
-            name =
-                    "script_"
-                            + System.currentTimeMillis()
-                            + ".sh";
-        }
-
-        return name;
-    }
-
-    private String normalizeSavedPath(
-            String savedPath
-    ) {
-
-        if (savedPath == null
-                || savedPath.trim().isEmpty()) {
-
-            return null;
-        }
-
-        savedPath =
-                savedPath.trim();
-
-        if (savedPath.startsWith(
-                RUNTIME_DIR + "/"
-        )) {
-
-            return savedPath;
-        }
-
-        String fileName =
-                new File(savedPath).getName();
-
-        if (fileName == null
-                || fileName.isEmpty()) {
-
-            return null;
-        }
-
-        return RUNTIME_DIR
-                + "/"
-                + fileName;
-    }
-
-    private void saveScripts() {
-
-        if (prefs == null) {
-
-            return;
-        }
-
-        synchronized (scriptList) {
-
-            prefs.edit()
-                    .putStringSet(
-                            "scripts",
-                            new HashSet<>(scriptList)
-                    )
-                    .apply();
-        }
-    }
-
-    private class ScriptAdapter
-            extends ArrayAdapter<String> {
-
-        ScriptAdapter() {
-
-            super(
-                    MainActivity.this,
-                    0,
-                    scriptList
-            );
-        }
-
-        @NonNull
-        @Override
-        public View getView(
-                int position,
-                View convertView,
-                @NonNull ViewGroup parent
-        ) {
-
-            if (convertView == null) {
-
-                convertView =
-                        LayoutInflater
-                                .from(getContext())
-                                .inflate(
-                                        R.layout.item_script,
-                                        parent,
-                                        false
-                                );
-            }
-
-            String path;
-
-            synchronized (scriptList) {
-
-                if (position < 0
-                        || position >= scriptList.size()) {
-
-                    return convertView;
-                }
-
-                path =
-                        scriptList.get(position);
-            }
-
-            String fileName =
-                    new File(path).getName();
-
-            TextView tvName =
-                    convertView.findViewById(
-                            R.id.tvScriptName
-                    );
-
-            Button btnRun =
-                    convertView.findViewById(
-                            R.id.btnRun
-                    );
-
-            Button btnDelete =
-                    convertView.findViewById(
-                            R.id.btnDelete
-                    );
-
-            if (tvName != null) {
-
-                tvName.setText(fileName);
-            }
-
-            if (btnRun != null) {
-
-                btnRun.setOnClickListener(
-                        v -> runElf(path)
-                );
-            }
-
-            if (btnDelete != null) {
-
-                btnDelete.setOnClickListener(
-                        v -> {
-
-                            String deletePath = null;
-
-                            synchronized (scriptList) {
-
-                                if (position >= 0
-                                        && position < scriptList.size()) {
-
-                                    deletePath =
-                                            scriptList.remove(position);
-                                }
-                            }
-
-                            if (deletePath != null) {
-
-                                final String target =
-                                        deletePath;
-
-                                new Thread(() -> {
-
-                                    try {
-
-                                        if (target.startsWith(
-                                                RUNTIME_DIR + "/"
-                                        )) {
-
-                                            Process p =
-                                                    new ProcessBuilder(
-                                                            findSu(),
-                                                            "-c",
-                                                            "rm -f "
-                                                                    + shellQuote(target)
-                                                    )
-                                                            .redirectErrorStream(true)
-                                                            .start();
-
-                                            p.waitFor();
-                                        }
-
-                                    } catch (Exception ignored) {
-                                    }
-
-                                }).start();
-                            }
-
-                            notifyDataSetChanged();
-
-                            saveScripts();
-                        }
-                );
-            }
-
-            return convertView;
-        }
-    }
-
-    private void appendText(
-            String text
-    ) {
-
-        if (text == null
-                || text.length() == 0) {
-
-            return;
-        }
-
-        runOnUiThread(() -> {
-
-            if (tvOutput == null) {
-
-                return;
-            }
-
-            tvOutput.append(text);
-
-            if (scrollView != null) {
-
-                scrollView.post(() ->
-                        scrollView.fullScroll(
-                                View.FOCUS_DOWN
-                        )
-                );
-            }
-        });
-    }
-
-    private String safeMessage(
-            Exception e
-    ) {
-
-        if (e == null) {
-
-            return "unknown error";
-        }
-
-        String msg =
-                e.getMessage();
-
-        if (msg == null
-                || msg.isEmpty()) {
-
-            return e.toString();
-        }
-
-        return msg;
-    }
-
-    @Override
-    protected void onDestroy() {
-
-        stopCurrentElf();
-
-        super.onDestroy();
-    }
+    return v;
 }
 
 
