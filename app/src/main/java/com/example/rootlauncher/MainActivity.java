@@ -322,12 +322,26 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // ★★★ 修复：加入清理 ANSI 颜色码的逻辑 ★★★
+    private String cleanAnsi(String text) {
+        if (text == null) return "";
+        // 移除 [1;32m 这种颜色码
+        text = text.replaceAll("\u001B\\[[0-9;?]*[ -/]*[@-~]", "");
+        // 移除 [0m 这种格式码
+        text = text.replaceAll("\\[(?:[0-9;?]+)m", "");
+        // 移除特定的无用文本（比如脚本作者加的提示）
+        text = text.replace("公益倒卖死全家", "");
+        return text;
+    }
+
     private void readProcessStream(InputStream input, boolean isError) {
         try {
             BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
             String line;
             while ((line = reader.readLine()) != null) {
-                appendText(isError ? "[STDERR] " + line + "\n" : line + "\n");
+                // ★★★ 调用清理函数 ★★★
+                String cleanedLine = cleanAnsi(line);
+                appendText(isError ? "[STDERR] " + cleanedLine + "\n" : cleanedLine + "\n");
             }
         } catch (Exception ignored) {}
     }
@@ -355,7 +369,7 @@ public class MainActivity extends AppCompatActivity {
                 Process process = Runtime.getRuntime().exec(new String[]{suPath, "-c", cmd});
                 BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 String line;
-                while ((line = reader.readLine()) != null) appendText(line + "\n");
+                while ((line = reader.readLine()) != null) appendText(cleanAnsi(line) + "\n");
                 process.waitFor();
             } catch (Exception e) {
                 appendText("[ERROR] 命令执行失败: " + e.getMessage() + "\n");
@@ -371,7 +385,6 @@ public class MainActivity extends AppCompatActivity {
             pb.redirectErrorStream(false);
             process = pb.start();
 
-            // ★★★ 修复：使用 final 变量以适应 Lambda 表达式 ★★★
             final Process finalProcess = process;
             final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
             final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
@@ -568,4 +581,4 @@ public class MainActivity extends AppCompatActivity {
             this.exitCode = exitCode;
         }
     }
-}
+            }
