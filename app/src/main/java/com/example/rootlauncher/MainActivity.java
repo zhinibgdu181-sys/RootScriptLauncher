@@ -4,12 +4,14 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -19,6 +21,7 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.constraintlayout.widget.ConstraintLayout;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -70,6 +73,21 @@ public class MainActivity extends AppCompatActivity {
      * 安装后的 BusyBox
      */
     private File busyboxFile;
+
+
+    // ============================================================
+    // 键盘状态
+    // ============================================================
+
+    private boolean keyboardVisible = false;
+
+    /*
+     * 键盘打开时，脚本列表压缩到这个高度。
+     *
+     * 120dp 可以保留两个左右的脚本项目，
+     * 同时把更多空间让给终端。
+     */
+    private static final int SCRIPT_LIST_KEYBOARD_DP = 120;
 
 
     // ============================================================
@@ -214,6 +232,18 @@ public class MainActivity extends AppCompatActivity {
 
         super.onCreate(savedInstanceState);
 
+
+        /*
+         * 关键：
+         *
+         * 键盘出现时，让 Activity 使用
+         * adjustResize，而不是让键盘覆盖界面。
+         */
+        getWindow().setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        );
+
+
         setContentView(
                 R.layout.activity_main
         );
@@ -300,6 +330,13 @@ public class MainActivity extends AppCompatActivity {
 
 
         // ========================================================
+        // 键盘监听
+        // ========================================================
+
+        setupKeyboardListener();
+
+
+        // ========================================================
         // 添加文件
         // ========================================================
 
@@ -341,7 +378,7 @@ public class MainActivity extends AppCompatActivity {
             /*
              * ELF 正在运行：
              *
-             * 输入必须进入 ELF stdin。
+             * 输入进入 ELF stdin。
              */
             if (elfRunning
                     && process != null
@@ -357,7 +394,7 @@ public class MainActivity extends AppCompatActivity {
 
             /*
              * 没有 ELF 运行时，
-             * 才执行 root 命令。
+             * 执行 root 命令。
              */
             executeCommand(
                     input
@@ -377,6 +414,219 @@ public class MainActivity extends AppCompatActivity {
             }
 
         }).start();
+    }
+
+
+    // ============================================================
+    // 键盘监听
+    // ============================================================
+
+    private void setupKeyboardListener() {
+
+        final View rootView =
+                findViewById(
+                        android.R.id.content
+                );
+
+
+        rootView.getViewTreeObserver()
+                .addOnGlobalLayoutListener(() -> {
+
+                    if (lvScripts == null) {
+                        return;
+                    }
+
+
+                    Rect visibleRect =
+                            new Rect();
+
+
+                    rootView.getWindowVisibleDisplayFrame(
+                            visibleRect
+                    );
+
+
+                    int rootHeight =
+                            rootView
+                                    .getRootView()
+                                    .getHeight();
+
+
+                    int visibleHeight =
+                            visibleRect.bottom
+                                    - visibleRect.top;
+
+
+                    int keyboardHeight =
+                            rootHeight
+                                    - visibleHeight;
+
+
+                    /*
+                     * 键盘高度超过屏幕 15%，
+                     * 认为软键盘已经弹出。
+                     */
+                    boolean nowVisible =
+                            keyboardHeight
+                                    > rootHeight * 0.15;
+
+
+                    /*
+                     * 状态没有变化，不重复刷新布局。
+                     */
+                    if (nowVisible
+                            == keyboardVisible) {
+
+                        return;
+                    }
+
+
+                    keyboardVisible =
+                            nowVisible;
+
+
+                    if (keyboardVisible) {
+
+                        /*
+                         * ==================================================
+                         * 键盘弹出
+                         *
+                         * 脚本列表：
+                         *
+                         * 55% → 120dp
+                         *
+                         * 释放出来的空间给终端。
+                         * ==================================================
+                         */
+
+                        setScriptListKeyboardMode(
+                                true
+                        );
+
+                    } else {
+
+                        /*
+                         * ==================================================
+                         * 键盘关闭
+                         *
+                         * 恢复原来的 55%。
+                         * ==================================================
+                         */
+
+                        setScriptListKeyboardMode(
+                                false
+                        );
+                    }
+                });
+    }
+
+
+    // ============================================================
+    // 修改脚本列表高度
+    // ============================================================
+
+    private void setScriptListKeyboardMode(
+            boolean keyboardMode
+    ) {
+
+        if (lvScripts == null) {
+            return;
+        }
+
+
+        ViewGroup.LayoutParams rawParams =
+                lvScripts.getLayoutParams();
+
+
+        if (!(rawParams instanceof ConstraintLayout.LayoutParams)) {
+            return;
+        }
+
+
+        ConstraintLayout.LayoutParams params =
+                (ConstraintLayout.LayoutParams)
+                        rawParams;
+
+
+        if (keyboardMode) {
+
+            /*
+             * 键盘打开：
+             *
+             * 固定 ListView 高度。
+             */
+            params.height =
+                    dpToPx(
+                            SCRIPT_LIST_KEYBOARD_DP
+                    );
+
+
+            /*
+             * 取消 ConstraintLayout 的
+             * 百分比高度约束。
+             */
+            params.matchConstraintPercentHeight =
+                    -1f;
+
+
+        } else {
+
+            /*
+             * 键盘关闭：
+             *
+             * 恢复原来的：
+             *
+             * height = 0dp
+             * height_percent = 55%
+             */
+            params.height =
+                    0;
+
+
+            params.matchConstraintPercentHeight =
+                    0.55f;
+        }
+
+
+        lvScripts.setLayoutParams(
+                params
+        );
+
+
+        lvScripts.requestLayout();
+
+
+        /*
+         * 键盘打开以后，
+         * 自动把终端滚到底部。
+         */
+        if (keyboardMode
+                && scrollView != null) {
+
+            scrollView.post(() ->
+                    scrollView.fullScroll(
+                            View.FOCUS_DOWN
+                    )
+            );
+        }
+    }
+
+
+    // ============================================================
+    // dp 转 px
+    // ============================================================
+
+    private int dpToPx(
+            int dp
+    ) {
+
+        return (int) (
+                dp
+                        * getResources()
+                        .getDisplayMetrics()
+                        .density
+                        + 0.5f
+        );
     }
 
 
@@ -503,9 +753,7 @@ public class MainActivity extends AppCompatActivity {
 
 
             /*
-             * 不在界面显示：
-             *
-             * >>> 1
+             * 输入直接进入 ELF stdin。
              */
             currentWriter.write(
                     input
@@ -1550,10 +1798,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
 
-        // ========================================================
-        // 删除真正 ANSI ESC
-        // ========================================================
-
+        /*
+         * 删除真正 ANSI ESC。
+         */
         text =
                 text.replaceAll(
                         "\u001B\\[[0-9;?]*[ -/]*[@-~]",
@@ -1561,10 +1808,9 @@ public class MainActivity extends AppCompatActivity {
                 );
 
 
-        // ========================================================
-        // 删除普通文本形式 ANSI
-        // ========================================================
-
+        /*
+         * 删除普通文本形式 ANSI。
+         */
         text =
                 text.replaceAll(
                         "\\[(?:[0-9;?]+)m",
@@ -1572,10 +1818,9 @@ public class MainActivity extends AppCompatActivity {
                 );
 
 
-        // ========================================================
-        // 删除指定文字
-        // ========================================================
-
+        /*
+         * 删除指定文字。
+         */
         text =
                 text.replace(
                         "公益倒卖死全家",
@@ -1760,20 +2005,18 @@ public class MainActivity extends AppCompatActivity {
             );
 
 
-            // ====================================================
-            // 运行
-            // ====================================================
-
+            /*
+             * 运行
+             */
             btnRun.setOnClickListener(
                     v ->
                             runElf(path)
             );
 
 
-            // ====================================================
-            // 删除
-            // ====================================================
-
+            /*
+             * 删除
+             */
             btnDelete.setOnClickListener(
                     v -> {
 
