@@ -56,7 +56,6 @@ public class MainActivity extends AppCompatActivity {
     private Process currentProcess;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     
-    // 核心标记：防止重复初始化
     private boolean isInitialized = false;
 
     @Override
@@ -81,6 +80,9 @@ public class MainActivity extends AppCompatActivity {
         initEnvironment();
         initListeners();
         isInitialized = true;
+        
+        // 确保初始状态锁定为 0.45f
+        updateListHeight(0.45f);
     }
 
     // ====================== 键盘监听模块 ======================
@@ -94,25 +96,23 @@ public class MainActivity extends AppCompatActivity {
             int screenHeight = rootView.getRootView().getHeight();
             int keypadHeight = screenHeight - r.bottom;
 
-            // 如果键盘高度超过屏幕的 15%，说明键盘弹出了
             if (keypadHeight > screenHeight * 0.15) {
-                // 键盘弹起：列表高度缩到 15%，终端跟着键盘上去
+                // 键盘弹起：列表缩到 15%，终端跟着键盘上去
                 updateListHeight(0.15f);
             } else {
-                // 键盘收起：列表恢复 70%，终端保持短小
-                updateListHeight(0.70f);
+                // 键盘收起：列表恢复 0.45f
+                updateListHeight(0.45f);
             }
         });
     }
 
     private void updateListHeight(float percent) {
         ConstraintLayout.LayoutParams params = (ConstraintLayout.LayoutParams) lvScripts.getLayoutParams();
-        // 强制设回0，确保百分比生效
         params.height = 0; 
         params.matchConstraintPercentHeight = percent;
         params.matchConstraintDefaultHeight = ConstraintLayout.LayoutParams.MATCH_CONSTRAINT_PERCENT;
         lvScripts.setLayoutParams(params);
-        lvScripts.requestLayout(); // 强制刷新
+        lvScripts.requestLayout();
     }
     // =====================================================
 
@@ -142,6 +142,7 @@ public class MainActivity extends AppCompatActivity {
                         initEnvironment();
                         initListeners();
                         isInitialized = true;
+                        updateListHeight(0.45f); // 授权成功后强制恢复
                     } else {
                         Toast.makeText(MainActivity.this, "仍未获取 Root 权限！", Toast.LENGTH_SHORT).show();
                         showRootDialog();
@@ -184,7 +185,6 @@ public class MainActivity extends AppCompatActivity {
         adapter = new ScriptAdapter(this, scriptList);
         lvScripts.setAdapter(adapter);
         
-        // 绑定键盘监听
         initKeyboardListener();
     }
 
@@ -206,7 +206,7 @@ public class MainActivity extends AppCompatActivity {
             mainHandler.post(() -> {
                 appendOutput("\n环境初始化完成，可以开始运行脚本。\n", "#00FF00");
                 refreshScriptList();
-                // ★★★ 重点：这里绝对不要碰布局！不调用任何 updateListHeight ★★★
+                // 绝对不在初始化完成后碰布局
             });
         }).start();
     }
