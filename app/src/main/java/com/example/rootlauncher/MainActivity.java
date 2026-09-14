@@ -1,7 +1,7 @@
 package com.example.rootlauncher;
 
 import android.content.Context;
-import android.content.content.pm.PackageInfo;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Rect;
 import android.os.Bundle;
@@ -46,11 +46,8 @@ public class MainActivity extends AppCompatActivity {
     };
 
     /*
-     * 这里如果你还没有正式签名，就保持这个占位值。
-     * 当前逻辑会允许运行。
-     *
-     * 如果以后要启用真正的签名校验，
-     * 再把这里替换成正式 Base64 签名。
+     * 如果还没有正式签名，就保持这个占位值。
+     * 占位状态下允许运行。
      */
     private static final String OFFICIAL_SIGNATURE =
             "你的正式签名Base64字符串==";
@@ -62,11 +59,12 @@ public class MainActivity extends AppCompatActivity {
     private Button btnAdd;
     private Button btnSend;
 
-    private final List<String> scriptList = new ArrayList<>();
+    private final List<String> scriptList =
+            new ArrayList<>();
 
     private ScriptAdapter adapter;
 
-    private Process currentProcess;
+    private volatile Process currentProcess;
 
     private final Handler mainHandler =
             new Handler(Looper.getMainLooper());
@@ -81,9 +79,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        /*
-         * 先做签名检查。
-         */
+        // 签名检查
         if (!checkSignature()) {
             Toast.makeText(
                     this,
@@ -97,9 +93,7 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        /*
-         * Root 检查。
-         */
+        // Root 检查
         if (!checkRootPermission()) {
             showRootDialog();
             return;
@@ -107,13 +101,6 @@ public class MainActivity extends AppCompatActivity {
 
         initViews();
 
-        /*
-         * 先初始化环境。
-         *
-         * 注意：
-         * 这里会把 assets 先复制到 App 私有目录，
-         * 再通过 su 复制到 /data/local/tmp。
-         */
         initEnvironment();
 
         initListeners();
@@ -153,10 +140,12 @@ public class MainActivity extends AppCompatActivity {
                     if (keypadHeight >
                             screenHeight * 0.15f) {
 
+                        // 键盘弹出
                         updateListHeight(0.15f);
 
                     } else {
 
+                        // 键盘收起
                         updateListHeight(0.45f);
                     }
                 });
@@ -171,7 +160,8 @@ public class MainActivity extends AppCompatActivity {
         ViewGroup.LayoutParams rawParams =
                 lvScripts.getLayoutParams();
 
-        if (!(rawParams instanceof ConstraintLayout.LayoutParams)) {
+        if (!(rawParams instanceof
+                ConstraintLayout.LayoutParams)) {
             return;
         }
 
@@ -180,7 +170,8 @@ public class MainActivity extends AppCompatActivity {
 
         params.height = 0;
 
-        params.matchConstraintPercentHeight = percent;
+        params.matchConstraintPercentHeight =
+                percent;
 
         params.matchConstraintDefaultHeight =
                 ConstraintLayout.LayoutParams
@@ -192,7 +183,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // Root
+    // Root 检查
     // ============================================================
 
     private boolean checkRootPermission() {
@@ -201,13 +192,14 @@ public class MainActivity extends AppCompatActivity {
 
         try {
 
-            process = new ProcessBuilder(
-                    "su",
-                    "-c",
-                    "id"
-            )
-                    .redirectErrorStream(true)
-                    .start();
+            process =
+                    new ProcessBuilder(
+                            "su",
+                            "-c",
+                            "id"
+                    )
+                            .redirectErrorStream(true)
+                            .start();
 
             BufferedReader reader =
                     new BufferedReader(
@@ -221,15 +213,19 @@ public class MainActivity extends AppCompatActivity {
 
             String line;
 
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append('\n');
+            while ((line =
+                    reader.readLine()) != null) {
+
+                output.append(line)
+                        .append('\n');
             }
 
             int exitCode =
                     process.waitFor();
 
             return exitCode == 0 &&
-                    output.toString().contains("uid=0");
+                    output.toString()
+                            .contains("uid=0");
 
         } catch (Exception e) {
 
@@ -251,7 +247,8 @@ public class MainActivity extends AppCompatActivity {
 
                 .setMessage(
                         "本应用需要 Root 权限才能运行 ELF。\n\n" +
-                        "请在 KernelSU / Magisk 中允许本应用，然后重新检测。"
+                        "请在 KernelSU / Magisk 中允许本应用，" +
+                        "然后重新检测。"
                 )
 
                 .setPositiveButton(
@@ -272,7 +269,9 @@ public class MainActivity extends AppCompatActivity {
 
                                         isInitialized = true;
 
-                                        updateListHeight(0.45f);
+                                        updateListHeight(
+                                                0.45f
+                                        );
                                     });
 
                                 } else {
@@ -304,7 +303,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // 签名
+    // 签名检查
     // ============================================================
 
     private boolean checkSignature() {
@@ -316,25 +315,31 @@ public class MainActivity extends AppCompatActivity {
 
             PackageInfo packageInfo;
 
-            /*
-             * 兼容 Android 新旧版本。
-             */
             if (android.os.Build.VERSION.SDK_INT >= 28) {
 
                 packageInfo =
                         pm.getPackageInfo(
                                 getPackageName(),
-                                PackageManager.GET_SIGNING_CERTIFICATES
+                                PackageManager
+                                        .GET_SIGNING_CERTIFICATES
                         );
 
-                if (packageInfo.signingInfo == null) {
+                if (packageInfo.signingInfo ==
+                        null) {
+                    return false;
+                }
+
+                android.content.pm.Signature[] signatures =
+                        packageInfo.signingInfo
+                                .getApkContentsSigners();
+
+                if (signatures == null ||
+                        signatures.length == 0) {
                     return false;
                 }
 
                 byte[] data =
-                        packageInfo.signingInfo
-                                .getApkContentsSigners()[0]
-                                .toByteArray();
+                        signatures[0].toByteArray();
 
                 String currentSig =
                         Base64.encodeToString(
@@ -342,11 +347,10 @@ public class MainActivity extends AppCompatActivity {
                                 Base64.DEFAULT
                         );
 
-                /*
-                 * 占位状态：允许启动。
-                 */
+                // 尚未配置正式签名
                 if (OFFICIAL_SIGNATURE.equals(
                         "你的正式签名Base64字符串==")) {
+
                     return true;
                 }
 
@@ -362,7 +366,8 @@ public class MainActivity extends AppCompatActivity {
                                 PackageManager.GET_SIGNATURES
                         );
 
-                if (packageInfo.signatures == null ||
+                if (packageInfo.signatures ==
+                        null ||
                         packageInfo.signatures.length == 0) {
                     return false;
                 }
@@ -376,6 +381,7 @@ public class MainActivity extends AppCompatActivity {
 
                 if (OFFICIAL_SIGNATURE.equals(
                         "你的正式签名Base64字符串==")) {
+
                     return true;
                 }
 
@@ -438,8 +444,7 @@ public class MainActivity extends AppCompatActivity {
             try {
 
                 /*
-                 * 第一步：
-                 * 通过 root 创建目标目录。
+                 * 创建 Root 目录。
                  */
                 boolean mkdirOk =
                         executeSuCommand(
@@ -450,7 +455,7 @@ public class MainActivity extends AppCompatActivity {
                 if (!mkdirOk) {
 
                     showError(
-                            "无法创建 Root 目录:\n" +
+                            "无法创建 Root 目录：\n" +
                             TARGET_DIR
                     );
 
@@ -458,17 +463,21 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 /*
-                 * 第二步：
-                 * BusyBox 不能直接由普通 App 写进
-                 * /data/local/tmp。
+                 * BusyBox：
                  *
-                 * 所以先写到 App 私有目录，
-                 * 然后 su cp 到目标目录。
+                 * assets
+                 *   ↓
+                 * App 私有目录
+                 *   ↓
+                 * su
+                 *   ↓
+                 * /data/local/tmp
                  */
                 boolean busyboxOk =
                         installAssetAsRoot(
                                 "busybox",
-                                TARGET_DIR + "/busybox"
+                                TARGET_DIR +
+                                        "/busybox"
                         );
 
                 if (!busyboxOk) {
@@ -476,29 +485,35 @@ public class MainActivity extends AppCompatActivity {
                     showError(
                             "BusyBox 安装失败。\n\n" +
                             "目标路径：\n" +
-                            TARGET_DIR + "/busybox"
+                            TARGET_DIR +
+                            "/busybox"
                     );
 
                     return;
                 }
 
                 /*
-                 * 第三步：
                  * 安装默认 ELF。
                  */
-                for (String script : DEFAULT_SCRIPTS) {
+                for (String script :
+                        DEFAULT_SCRIPTS) {
 
                     boolean ok =
                             installAssetAsRoot(
                                     script,
-                                    TARGET_DIR + "/" + script
+                                    TARGET_DIR +
+                                            "/" +
+                                            script
                             );
 
                     if (!ok) {
 
                         showError(
                                 "脚本安装失败：\n" +
-                                script
+                                script +
+                                "\n\n" +
+                                "请确认该文件确实位于 " +
+                                "app/src/main/assets/"
                         );
 
                         return;
@@ -506,26 +521,30 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 /*
-                 * 第四步：
-                 * chmod。
+                 * 设置权限。
                  */
-                boolean chmodOk =
-                        executeSuCommand(
-                                "chmod 755 " +
-                                shellQuote(TARGET_DIR) +
-                                "/busybox " +
-                                shellQuote(TARGET_DIR) +
-                                "/*.sh"
-                        );
+                executeSuCommand(
+                        "chmod 755 " +
+                        shellQuote(
+                                TARGET_DIR +
+                                "/busybox"
+                        )
+                );
+
+                executeSuCommand(
+                        "chmod 755 " +
+                        shellQuote(
+                                TARGET_DIR
+                        ) +
+                        "/*.sh"
+                );
 
                 /*
-                 * 第五步：
                  * 创建 DNS 文件。
-                 *
-                 * 不依赖 echo -e。
                  */
                 String resolvPath =
-                        TARGET_DIR + "/resolv.conf";
+                        TARGET_DIR +
+                                "/resolv.conf";
 
                 String dnsCommand =
                         "printf '%s\\n' " +
@@ -538,16 +557,21 @@ public class MainActivity extends AppCompatActivity {
                 executeSuCommand(dnsCommand);
 
                 /*
-                 * 第六步：
-                 * 最重要的实际验证。
+                 * 最终验证。
                  */
                 String verifyCommand =
                         "echo '=== ENV CHECK ==='; " +
+
                         "ls -l " +
                         shellQuote(TARGET_DIR) +
                         "; " +
-                        shellQuote(TARGET_DIR + "/busybox") +
-                        " --list | grep '^script$'";
+
+                        shellQuote(
+                                TARGET_DIR +
+                                "/busybox"
+                        ) +
+                        " --list | " +
+                        "grep '^script$'";
 
                 String verifyOutput =
                         executeSuCommandGetOutput(
@@ -561,9 +585,6 @@ public class MainActivity extends AppCompatActivity {
                             "#00FF00"
                     );
 
-                    /*
-                     * 把真正的环境验证结果显示出来。
-                     */
                     appendOutput(
                             verifyOutput,
                             "#00FF00"
@@ -584,7 +605,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // Asset → App 私有目录 → Root 目录
+    // Asset 安装
     // ============================================================
 
     private boolean installAssetAsRoot(
@@ -603,14 +624,17 @@ public class MainActivity extends AppCompatActivity {
         try {
 
             /*
-             * 1. Asset → App 私有目录
+             * Asset → App 私有目录
              */
             try (
                     InputStream is =
-                            getAssets().open(assetName);
+                            getAssets()
+                                    .open(assetName);
 
                     OutputStream os =
-                            new FileOutputStream(tempFile)
+                            new FileOutputStream(
+                                    tempFile
+                            )
             ) {
 
                 byte[] buffer =
@@ -618,9 +642,14 @@ public class MainActivity extends AppCompatActivity {
 
                 int len;
 
-                while ((len = is.read(buffer)) != -1) {
+                while ((len =
+                        is.read(buffer)) != -1) {
 
-                    os.write(buffer, 0, len);
+                    os.write(
+                            buffer,
+                            0,
+                            len
+                    );
                 }
 
                 os.flush();
@@ -633,7 +662,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             /*
-             * 2. App 私有目录 → Root 目标目录
+             * App 私有目录
+             *       ↓
+             * su
+             *       ↓
+             * /data/local/tmp
              */
             String command =
                     "mkdir -p " +
@@ -669,20 +702,24 @@ public class MainActivity extends AppCompatActivity {
                     process.waitFor();
 
             /*
-             * 3. 删除临时文件
+             * 删除 App 私有临时文件。
              */
             //noinspection ResultOfMethodCallIgnored
             tempFile.delete();
 
-            /*
-             * 4. Root 侧再次验证
-             */
             if (exitCode != 0) {
+
                 return false;
             }
 
+            /*
+             * Root 侧验证。
+             */
             String verify =
                     executeSuCommandGetOutput(
+                            "test -f " +
+                            shellQuote(destPath) +
+                            " && " +
                             "test -x " +
                             shellQuote(destPath) +
                             " && echo OK"
@@ -702,7 +739,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // 执行普通 Root 命令
+    // Root 命令
     // ============================================================
 
     private boolean executeSuCommand(
@@ -721,7 +758,9 @@ public class MainActivity extends AppCompatActivity {
                             .redirectErrorStream(true)
                             .start();
 
-            readAll(process.getInputStream());
+            readAll(
+                    process.getInputStream()
+            );
 
             int exitCode =
                     process.waitFor();
@@ -780,7 +819,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // 脚本列表
+    // 刷新脚本列表
     // ============================================================
 
     private void refreshScriptList() {
@@ -794,20 +833,23 @@ public class MainActivity extends AppCompatActivity {
         for (String script :
                 DEFAULT_SCRIPTS) {
 
-            /*
-             * 只有真正存在的文件才加入列表。
-             */
             String path =
-                    TARGET_DIR + "/" + script;
+                    TARGET_DIR +
+                            "/" +
+                            script;
 
             String result =
                     executeSuCommandGetOutput(
                             "test -f " +
                             shellQuote(path) +
+                            " && " +
+                            "test -x " +
+                            shellQuote(path) +
                             " && echo EXISTS"
                     );
 
             if (result.contains("EXISTS")) {
+
                 scriptList.add(script);
             }
         }
@@ -818,7 +860,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // Listener
+    // 按钮
     // ============================================================
 
     private void initListeners() {
@@ -827,8 +869,7 @@ public class MainActivity extends AppCompatActivity {
 
             Toast.makeText(
                     this,
-                    "默认脚本放在 assets 中。\n" +
-                    "当前版本通过 Root 自动部署。",
+                    "默认脚本通过 assets 自动部署。",
                     Toast.LENGTH_LONG
             ).show();
         });
@@ -847,8 +888,8 @@ public class MainActivity extends AppCompatActivity {
             etInput.setText("");
 
             /*
-             * 如果 ELF 正在运行，
-             * 输入直接发送给 ELF。
+             * ELF 正在运行：
+             * 把输入发送给 ELF。
              */
             if (currentProcess != null) {
 
@@ -856,6 +897,10 @@ public class MainActivity extends AppCompatActivity {
 
             } else {
 
+                /*
+                 * 没有 ELF 运行：
+                 * 执行 Root 命令。
+                 */
                 executeCommand(cmd);
             }
         });
@@ -865,7 +910,8 @@ public class MainActivity extends AppCompatActivity {
     // 普通 Root 命令
     // ============================================================
 
-    private void executeCommand(String cmd) {
+    private void executeCommand(
+            String cmd) {
 
         appendOutput(
                 "$ " + cmd + "\n",
@@ -900,13 +946,15 @@ public class MainActivity extends AppCompatActivity {
 
                     cmd;
 
-            executeSuCommandStream(fullCmd);
+            executeSuCommandStream(
+                    fullCmd
+            );
 
         }).start();
     }
 
     // ============================================================
-    // 运行 ELF
+    // ELF 运行
     // ============================================================
 
     private void runElfReal(
@@ -916,31 +964,26 @@ public class MainActivity extends AppCompatActivity {
 
             try {
 
-                File elf =
-                        new File(scriptPath);
-
                 /*
-                 * 先验证 ELF。
+                 * 检查 ELF。
                  */
                 if (!rootFileExists(
                         scriptPath)) {
 
                     showError(
-                            "脚本不存在：\n" +
-                            scriptPath +
-                            "\n\n" +
-                            "请先确认 assets 中存在该文件。"
+                            "脚本不存在或不可执行：\n" +
+                            scriptPath
                     );
 
                     return;
                 }
 
                 /*
-                 * 验证 BusyBox。
+                 * 检查 BusyBox。
                  */
                 String busybox =
                         TARGET_DIR +
-                        "/busybox";
+                                "/busybox";
 
                 if (!rootFileExists(
                         busybox)) {
@@ -954,18 +997,20 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 /*
-                 * 验证 script applet。
+                 * 检查 script applet。
                  */
                 String applet =
                         executeSuCommandGetOutput(
                                 shellQuote(busybox) +
-                                " --list | grep '^script$'"
+                                " --list | " +
+                                "grep '^script$'"
                         );
 
-                if (!applet.contains("script")) {
+                if (!applet.contains(
+                        "script")) {
 
                     showError(
-                            "当前 BusyBox 没有 script applet。\n\n" +
+                            "BusyBox 没有 script applet。\n\n" +
                             "Kairos 需要 PTY 才能正常交互。"
                     );
 
@@ -986,7 +1031,7 @@ public class MainActivity extends AppCompatActivity {
                 );
 
                 /*
-                 * 运行环境。
+                 * 环境变量。
                  */
                 String envCmd =
                         "export PATH=" +
@@ -1015,12 +1060,13 @@ public class MainActivity extends AppCompatActivity {
                         "; ";
 
                 /*
-                 * 这里是整个程序最关键的部分：
+                 * 关键：
                  *
-                 * BusyBox script 创建 PTY，
-                 * 然后 exec ELF。
-                 *
-                 * 不要改成直接 Runtime.exec(ELF)。
+                 * BusyBox script
+                 *      ↓
+                 * PTY
+                 *      ↓
+                 * exec ELF
                  */
                 String command =
                         envCmd +
@@ -1044,7 +1090,7 @@ public class MainActivity extends AppCompatActivity {
                         );
 
                 /*
-                 * 环境变量再设置一遍。
+                 * Java Process 环境。
                  */
                 pb.environment().put(
                         "PATH",
@@ -1083,10 +1129,13 @@ public class MainActivity extends AppCompatActivity {
                         pb.start();
 
                 /*
-                 * 不使用 BufferedReader.readLine()。
+                 * 不使用 readLine()。
                  *
-                 * Kairos 的输入提示可能没有换行，
-                 * readLine() 会一直等。
+                 * Kairos 的：
+                 *
+                 * 请输入选择(1或2) ->
+                 *
+                 * 可能没有换行。
                  */
                 InputStream input =
                         currentProcess
@@ -1156,12 +1205,11 @@ public class MainActivity extends AppCompatActivity {
                         )
                 );
             }
-
         }).start();
     }
 
     // ============================================================
-    // 给正在运行的 ELF 输入
+    // 给 ELF 输入
     // ============================================================
 
     private void sendInputToProcess(
@@ -1192,7 +1240,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // Root 文件检查
+    // 文件检查
     // ============================================================
 
     private boolean rootFileExists(
@@ -1212,7 +1260,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // Root 命令输出
+    // Root 流式输出
     // ============================================================
 
     private void executeSuCommandStream(
@@ -1278,7 +1326,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // ANSI 清理
+    // 清理 ANSI
     // ============================================================
 
     private String cleanElfOutput(
@@ -1297,7 +1345,7 @@ public class MainActivity extends AppCompatActivity {
         );
 
         /*
-         * ESC 开头的其它常见控制序列。
+         * ANSI OSC。
          */
         text = text.replaceAll(
                 "\u001B\\][^\u0007]*(?:\u0007|\u001B\\\\)",
@@ -1305,7 +1353,7 @@ public class MainActivity extends AppCompatActivity {
         );
 
         /*
-         * 剩余颜色标记。
+         * 颜色标记。
          */
         text = text.replaceAll(
                 "\\[(?:[0-9;?]+)m",
@@ -1383,7 +1431,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // 读取全部输出
+    // 读取全部
     // ============================================================
 
     private String readAll(
@@ -1495,16 +1543,14 @@ public class MainActivity extends AppCompatActivity {
                             "/" +
                             scriptName;
 
-                    executeSuCommand(
-                            "rm -f " +
-                            shellQuote(path)
-                    );
+                    boolean ok =
+                            executeSuCommand(
+                                    "rm -f " +
+                                    shellQuote(path)
+                            );
 
                     mainHandler.post(() -> {
 
-                        /*
-                         * 防止 position 因列表变化导致异常。
-                         */
                         if (position >= 0 &&
                                 position < items.size()) {
 
@@ -1514,9 +1560,13 @@ public class MainActivity extends AppCompatActivity {
                         }
 
                         appendOutput(
-                                "已删除: " +
-                                scriptName +
-                                "\n",
+                                ok
+                                        ? "已删除: " +
+                                          scriptName +
+                                          "\n"
+                                        : "删除失败: " +
+                                          scriptName +
+                                          "\n",
                                 "#FFCC00"
                         );
                     });
@@ -1525,7 +1575,7 @@ public class MainActivity extends AppCompatActivity {
             });
 
             /*
-             * 运行。
+             * 运行 ELF。
              */
             btnRun.setOnClickListener(v -> {
 
@@ -1553,6 +1603,7 @@ public class MainActivity extends AppCompatActivity {
         try {
 
             if (currentProcess != null) {
+
                 currentProcess.destroy();
             }
 
@@ -1562,5 +1613,3 @@ public class MainActivity extends AppCompatActivity {
         currentProcess = null;
     }
 }
-
-
