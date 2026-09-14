@@ -51,7 +51,6 @@ public class MainActivity extends AppCompatActivity {
             "TIME_Cloud_Loader_Release_1732727.sh"
     };
 
-    // 只保留XML里实际存在的控件
     private TextView tvOutput;
     private EditText etInput;
     private ScrollView scrollView;
@@ -72,7 +71,6 @@ public class MainActivity extends AppCompatActivity {
     private final Object processLock = new Object();
     private boolean isInitialized = false;
 
-    // 文件选择器
     private final ActivityResultLauncher<String[]> filePicker =
             registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
                 if (uri == null) return;
@@ -84,7 +82,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // 1. 绑定 XML 里的 6 个控件
         tvOutput = findViewById(R.id.tvOutput);
         etInput = findViewById(R.id.etInput);
         scrollView = findViewById(R.id.scrollView);
@@ -101,10 +98,8 @@ public class MainActivity extends AppCompatActivity {
         appendText("Root Launcher 初始化中...\n");
         appendText("==============================\n");
 
-        // 2. 初始化布局高度 (列表 45%，终端 55%)
         updateListHeight(0.45f);
 
-        // 3. 启动 Root 初始化线程
         executor.execute(() -> {
             suPath = findSu();
             if (suPath == null) {
@@ -135,7 +130,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ====================== 键盘监听与布局控制 ======================
     private void initKeyboardListener() {
         final View rootView = findViewById(android.R.id.content);
         rootView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
@@ -146,9 +140,9 @@ public class MainActivity extends AppCompatActivity {
             int keypadHeight = screenHeight - r.bottom;
 
             if (keypadHeight > screenHeight * 0.15) {
-                updateListHeight(0.15f); // 键盘弹起
+                updateListHeight(0.15f);
             } else {
-                updateListHeight(0.45f); // 键盘收起
+                updateListHeight(0.45f);
             }
         });
     }
@@ -163,19 +157,16 @@ public class MainActivity extends AppCompatActivity {
         lvScripts.requestLayout();
     }
 
-    // ====================== UI 初始化 ======================
     private void setupListView() {
         scriptAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_activated_1, scriptList);
         lvScripts.setAdapter(scriptAdapter);
 
-        // 点击列表项直接运行
         lvScripts.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= 0 && position < scriptList.size()) {
                 runFile(scriptList.get(position));
             }
         });
 
-        // 长按删除
         lvScripts.setOnItemLongClickListener((parent, view, position, id) -> {
             if (position >= 0 && position < scriptList.size()) {
                 new AlertDialog.Builder(this)
@@ -193,14 +184,12 @@ public class MainActivity extends AppCompatActivity {
         if (btnAdd != null) {
             btnAdd.setOnClickListener(v -> filePicker.launch(new String[]{"*/*"}));
         }
-        // 这里绝对不碰不存在的 btnStop / btnClear
     }
 
     private void setupInput() {
         if (etInput == null) return;
 
         etInput.setOnEditorActionListener((v, actionId, event) -> {
-            // 统一处理回车和发送键
             boolean enter = (actionId == EditorInfo.IME_ACTION_DONE) ||
                     (actionId == EditorInfo.IME_ACTION_SEND) ||
                     (actionId == EditorInfo.IME_ACTION_GO) ||
@@ -229,7 +218,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ★ 核心：智能输入处理（判断脚本是否在运行）
     private void handleInputSend(String text) {
         if (isScriptRunning.get() && processStdin != null) {
             try {
@@ -244,7 +232,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ====================== Root 初始化与 DNS 修复 ======================
     private void initDnsFix() {
         String resolvPath = RUNTIME_DIR + "/resolv.conf";
         String dnsContent = "nameserver 114.114.114.114\\nnameserver 8.8.8.8\\n";
@@ -276,7 +263,6 @@ public class MainActivity extends AppCompatActivity {
         return runRootCommand(command, 10000).success;
     }
 
-    // ====================== 核心：运行脚本 (PTY) ======================
     private void runFile(String path) {
         if (path == null || path.trim().isEmpty()) return;
         String finalPath = path.startsWith("/") ? path : RUNTIME_DIR + "/" + sanitizeFileName(path);
@@ -361,7 +347,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ====================== 普通 Root 命令执行 ======================
     private void runRootCommandStream(String cmd) {
         appendText("$ " + cmd + "\n");
         executor.execute(() -> {
@@ -386,25 +371,27 @@ public class MainActivity extends AppCompatActivity {
             pb.redirectErrorStream(false);
             process = pb.start();
 
-            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            // ★★★ 修复：使用 final 变量以适应 Lambda 表达式 ★★★
+            final Process finalProcess = process;
+            final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+            final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
 
-            Thread outThread = new Thread(() -> copyStream(process.getInputStream(), stdout));
-            Thread errThread = new Thread(() -> copyStream(process.getErrorStream(), stderr));
+            Thread outThread = new Thread(() -> copyStream(finalProcess.getInputStream(), stdout));
+            Thread errThread = new Thread(() -> copyStream(finalProcess.getErrorStream(), stderr));
             outThread.start();
             errThread.start();
 
             long start = System.currentTimeMillis();
             while (true) {
                 try {
-                    int exit = process.exitValue();
+                    int exit = finalProcess.exitValue();
                     outThread.join(1000);
                     errThread.join(1000);
                     return new ShellResult(exit == 0, stdout.toString("UTF-8"), stderr.toString("UTF-8"), exit);
                 } catch (IllegalThreadStateException ignored) {}
 
                 if (System.currentTimeMillis() - start > timeoutMs) {
-                    process.destroyForcibly();
+                    finalProcess.destroyForcibly();
                     return new ShellResult(false, stdout.toString("UTF-8"), stderr.toString("UTF-8") + "\nTIMEOUT", -2);
                 }
                 Thread.sleep(20);
@@ -424,7 +411,6 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception ignored) {}
     }
 
-    // ====================== 内置文件安装 ======================
     private void installBuiltinAssets() {
         try {
             byte[] bbBytes = readAsset(BUSYBOX_NAME);
@@ -472,7 +458,6 @@ public class MainActivity extends AppCompatActivity {
         return runRootCommand(cmd, 30000).success;
     }
 
-    // ====================== 文件导入 ======================
     private void importSelectedFile(Uri uri) {
         String originalName = getDisplayName(uri);
         String fileName = sanitizeFileName(originalName != null ? originalName : "imported_file");
@@ -499,7 +484,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ====================== 列表管理 ======================
     private void loadScriptList() {
         scriptList.clear();
         Set<String> saved = preferences.getStringSet(PREF_SCRIPT_LIST, null);
@@ -534,7 +518,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ====================== 工具类 ======================
     private String getDisplayName(Uri uri) {
         try (Cursor cursor = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) {
