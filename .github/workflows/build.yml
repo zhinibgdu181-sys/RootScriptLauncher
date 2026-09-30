@@ -1,6 +1,9 @@
 name: Build Android APK
 on: [push, workflow_dispatch]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -66,15 +69,59 @@ jobs:
         rm -f "$KEYSTORE"
         echo "signed=true" >> "$GITHUB_OUTPUT"
 
-    - name: Upload signed APK
+    - name: Upload signed APK artifact
       if: steps.sign_release.outputs.signed == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: RootScriptLauncher-Release-Signed
         path: app/build/outputs/apk/release/RootScriptLauncher-release-signed.apk
 
-    - name: Upload unsigned APK
+    - name: Upload unsigned APK artifact
       uses: actions/upload-artifact@v4
       with:
         name: RootScriptLauncher-Release-Unsigned
         path: app/build/outputs/apk/release/app-release-unsigned.apk
+
+    - name: Publish GitHub Release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        VERSION_NAME="$(sed -n 's/.*versionName[[:space:]]*["'\''"]\([^"'\''"]*\)["'\''"].*/\1/p' app/build.gradle | head -n 1)"
+        if [ -z "$VERSION_NAME" ]; then
+          echo "Could not determine versionName" >&2
+          exit 1
+        fi
+
+        TAG="v$VERSION_NAME"
+        UNSIGNED_SRC="app/build/outputs/apk/release/app-release-unsigned.apk"
+        UNSIGNED_DST="$RUNNER_TEMP/RootScriptLauncher-$TAG-Release-Unsigned.apk"
+        cp "$UNSIGNED_SRC" "$UNSIGNED_DST"
+
+        NOTES="RootScriptLauncher $TAG
+
+Changes:
+- Removed the two bundled scripts from the launcher.
+- Existing user-imported scripts remain supported.
+- Legacy bundled-script entries are cleaned up after upgrade.
+
+Files:
+- Signed APK is published automatically when repository signing secrets are configured.
+- Unsigned APK is retained as a reproducible build artifact."
+
+        if gh release view "$TAG" >/dev/null 2>&1; then
+          gh release edit "$TAG" --title "RootScriptLauncher $TAG" --notes "$NOTES"
+        else
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "RootScriptLauncher $TAG" --notes "$NOTES"
+        fi
+
+        gh release upload "$TAG" "$UNSIGNED_DST" --clobber
+
+        SIGNED_SRC="app/build/outputs/apk/release/RootScriptLauncher-release-signed.apk"
+        if [ -f "$SIGNED_SRC" ]; then
+          SIGNED_DST="$RUNNER_TEMP/RootScriptLauncher-$TAG-Release-Signed.apk"
+          cp "$SIGNED_SRC" "$SIGNED_DST"
+          gh release upload "$TAG" "$SIGNED_DST" --clobber
+        fi
