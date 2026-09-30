@@ -66,17 +66,6 @@ jobs:
         rm -f "$KEYSTORE"
         echo "signed=true" >> "$GITHUB_OUTPUT"
 
-    - name: Export apksigner tool
-      shell: bash
-      run: |
-        set -euo pipefail
-        APKSIGNER_JAR="$(find "$ANDROID_HOME/build-tools" -type f -path '*/lib/apksigner.jar' | sort -V | tail -n 1)"
-        if [ -z "$APKSIGNER_JAR" ]; then
-          echo "apksigner.jar not found" >&2
-          exit 1
-        fi
-        cp "$APKSIGNER_JAR" "$RUNNER_TEMP/apksigner.jar"
-
     - name: Upload signed APK
       if: steps.sign_release.outputs.signed == 'true'
       uses: actions/upload-artifact@v4
@@ -89,10 +78,3 @@ jobs:
       with:
         name: RootScriptLauncher-Release-Unsigned
         path: app/build/outputs/apk/release/app-release-unsigned.apk
-
-    - name: Upload apksigner tool
-      uses: actions/upload-artifact@v4
-      with:
-        name: Android-ApkSigner-Tool
-        path: ${{ runner.temp }}/apksigner.jar
-        retention-days: 1
