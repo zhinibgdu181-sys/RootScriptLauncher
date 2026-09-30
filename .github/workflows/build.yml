@@ -19,12 +19,80 @@ jobs:
       with:
         gradle-version: 8.4
 
-    # 改为编译 Release 包
     - name: Build Release APK
       run: gradle assembleRelease
 
-    - name: Upload APK
+    - name: Sign Release APK when signing secrets are configured
+      id: sign_release
+      env:
+        ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ] || \
+           [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ] || \
+           [ -z "${ANDROID_KEY_ALIAS:-}" ] || \
+           [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then
+          echo "Signing secrets are not configured; keeping unsigned artifact only."
+          echo "signed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        KEYSTORE="$RUNNER_TEMP/release-signing.jks"
+        SIGNED_APK="app/build/outputs/apk/release/RootScriptLauncher-release-signed.apk"
+        UNSIGNED_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+
+        printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+
+        APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+        if [ -z "$APKSIGNER" ]; then
+          echo "apksigner not found in Android SDK" >&2
+          exit 1
+        fi
+
+        "$APKSIGNER" sign \
+          --ks "$KEYSTORE" \
+          --ks-key-alias "$ANDROID_KEY_ALIAS" \
+          --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+          --key-pass env:ANDROID_KEY_PASSWORD \
+          --out "$SIGNED_APK" \
+          "$UNSIGNED_APK"
+
+        "$APKSIGNER" verify --verbose --print-certs "$SIGNED_APK"
+        rm -f "$KEYSTORE"
+        echo "signed=true" >> "$GITHUB_OUTPUT"
+
+    - name: Export apksigner tool
+      shell: bash
+      run: |
+        set -euo pipefail
+        APKSIGNER_JAR="$(find "$ANDROID_HOME/build-tools" -type f -path '*/lib/apksigner.jar' | sort -V | tail -n 1)"
+        if [ -z "$APKSIGNER_JAR" ]; then
+          echo "apksigner.jar not found" >&2
+          exit 1
+        fi
+        cp "$APKSIGNER_JAR" "$RUNNER_TEMP/apksigner.jar"
+
+    - name: Upload signed APK
+      if: steps.sign_release.outputs.signed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: RootScriptLauncher-Release-Signed
+        path: app/build/outputs/apk/release/RootScriptLauncher-release-signed.apk
+
+    - name: Upload unsigned APK
       uses: actions/upload-artifact@v4
       with:
         name: RootScriptLauncher-Release-Unsigned
         path: app/build/outputs/apk/release/app-release-unsigned.apk
+
+    - name: Upload apksigner tool
+      uses: actions/upload-artifact@v4
+      with:
+        name: Android-ApkSigner-Tool
+        path: ${{ runner.temp }}/apksigner.jar
+        retention-days: 1
