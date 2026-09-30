@@ -62,8 +62,8 @@ public class MainActivity extends AppCompatActivity {
 
     private static final int SCRIPT_LIST_KEYBOARD_DP = 120;
 
-    private static final String BUILTIN_KAIROS = "Kairos_Driver_Loader_Release_90f76e9.sh";
-    private static final String BUILTIN_TIME = "TIME_Cloud_Loader_Release_1732727.sh";
+    private static final String LEGACY_BUILTIN_KAIROS = "Kairos_Driver_Loader_Release_90f76e9.sh";
+    private static final String LEGACY_BUILTIN_TIME = "TIME_Cloud_Loader_Release_1732727.sh";
     private static final String BUSYBOX_ASSET = "busybox";
 
     private static final String RUNTIME_DIR = "/data/local/tmp/com.example.rootlauncher/files";
@@ -176,9 +176,6 @@ public class MainActivity extends AppCompatActivity {
         prefs = getSharedPreferences("script_prefs", MODE_PRIVATE);
         loadScriptsOrdered();
 
-        addBuiltinScript(BUILTIN_KAIROS);
-        addBuiltinScript(BUILTIN_TIME);
-
         adapter = new ScriptAdapter();
         lvScripts.setAdapter(adapter);
         setupKeyboardListener();
@@ -189,8 +186,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             prepareRuntimeDir();
-            installBuiltinAsset(BUILTIN_KAIROS);
-            installBuiltinAsset(BUILTIN_TIME);
+            removeLegacyBuiltinFilesAsRoot();
         }).start();
 
         btnAdd.setOnClickListener(v -> {
@@ -315,6 +311,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         }
+        saveScripts();
     }
 
     private void saveScripts() {
@@ -408,53 +405,19 @@ public class MainActivity extends AppCompatActivity {
         return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
     }
 
-    private void addBuiltinScript(String assetName) {
-        String runtimePath = RUNTIME_DIR + "/" + assetName;
-        if (!scriptList.contains(runtimePath)) {
-            scriptList.add(runtimePath);
-            saveScripts();
-        }
+    private boolean isLegacyBuiltinScript(String fileName) {
+        return LEGACY_BUILTIN_KAIROS.equals(fileName) || LEGACY_BUILTIN_TIME.equals(fileName);
     }
 
-    private boolean installBuiltinAsset(String assetName) {
+    private void removeLegacyBuiltinFilesAsRoot() {
         try {
-            if (!prepareRuntimeDir()) return false;
-
-            File tempFile = new File(getFilesDir(), "builtin_" + assetName);
-            InputStream is = getAssets().open(assetName);
-            FileOutputStream fos = new FileOutputStream(tempFile);
-
-            byte[] buffer = new byte[8192];
-            int len;
-            while ((len = is.read(buffer)) > 0) {
-                fos.write(buffer, 0, len);
-            }
-            is.close();
-            fos.close();
-
-            if (!tempFile.exists() || tempFile.length() == 0) {
-                tempFile.delete();
-                appendText("[内置 ELF] 文件异常：" + assetName + "\n");
-                return false;
-            }
-
-            String runtimePath = RUNTIME_DIR + "/" + assetName;
-            boolean copied = copyFileAsRoot(tempFile.getAbsolutePath(), runtimePath);
-            tempFile.delete();
-
-            if (!copied) {
-                appendText("[内置 ELF] 安装失败：" + assetName + "\n");
-                return false;
-            }
-
-            if (!chmod755(runtimePath)) {
-                appendText("[内置 ELF] chmod 755 失败：" + assetName + "\n");
-                return false;
-            }
-            return true;
-        } catch (Exception e) {
-            appendText("[内置 ELF] 安装异常：" + assetName + " : " + e.getMessage() + "\n");
-            return false;
+            String kairosPath = RUNTIME_DIR + "/" + LEGACY_BUILTIN_KAIROS;
+            String timePath = RUNTIME_DIR + "/" + LEGACY_BUILTIN_TIME;
+            String command = "rm -f " + shellQuote(kairosPath) + " " + shellQuote(timePath);
+            Process p = new ProcessBuilder(findSu(), "-c", command).redirectErrorStream(true).start();
+            readAll(p.getInputStream());
+            p.waitFor();
+        } catch (Exception ignored) {
         }
     }
 
@@ -584,17 +547,6 @@ public class MainActivity extends AppCompatActivity {
             if (runtimePath == null) {
                 appendText("[ELF] 无效路径\n");
                 return;
-            }
-
-            String fileName = new File(runtimePath).getName();
-            if (BUILTIN_KAIROS.equals(fileName) || BUILTIN_TIME.equals(fileName)) {
-                File builtinFile = new File(runtimePath);
-                if (!builtinFile.exists() || builtinFile.length() == 0) {
-                    if (!installBuiltinAsset(fileName)) {
-                        appendText("[ELF] 内置文件安装失败：" + fileName + "\n");
-                        return;
-                    }
-                }
             }
 
             File elf = new File(runtimePath);
@@ -896,15 +848,13 @@ public class MainActivity extends AppCompatActivity {
     private String normalizeSavedPath(String savedPath) {
         if (savedPath == null || savedPath.trim().isEmpty()) return null;
         savedPath = savedPath.trim();
-        if (savedPath.startsWith(RUNTIME_DIR + "/")) return savedPath;
 
         String fileName = new File(savedPath).getName();
         if (fileName == null || fileName.isEmpty()) return null;
+        if (isLegacyBuiltinScript(fileName)) return null;
 
-        String newPath = RUNTIME_DIR + "/" + fileName;
-        if (new File(newPath).exists()) return newPath;
-        if (BUILTIN_KAIROS.equals(fileName) || BUILTIN_TIME.equals(fileName)) return newPath;
-        return newPath;
+        if (savedPath.startsWith(RUNTIME_DIR + "/")) return savedPath;
+        return RUNTIME_DIR + "/" + fileName;
     }
 
     private class ScriptAdapter extends ArrayAdapter<String> {
