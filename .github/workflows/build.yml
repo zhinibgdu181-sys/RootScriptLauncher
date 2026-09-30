@@ -100,16 +100,17 @@ jobs:
         UNSIGNED_DST="$RUNNER_TEMP/RootScriptLauncher-$TAG-Release-Unsigned.apk"
         cp "$UNSIGNED_SRC" "$UNSIGNED_DST"
 
-        NOTES="RootScriptLauncher $TAG
-
-Changes:
-- Removed the two bundled scripts from the launcher.
-- Existing user-imported scripts remain supported.
-- Legacy bundled-script entries are cleaned up after upgrade.
-
-Files:
-- Signed APK is published automatically when repository signing secrets are configured.
-- Unsigned APK is retained as a reproducible build artifact."
+        NOTES="$(printf '%s\n' \
+          "RootScriptLauncher $TAG" \
+          "" \
+          "Changes:" \
+          "- Removed the two bundled scripts from the launcher." \
+          "- Existing user-imported scripts remain supported." \
+          "- Legacy bundled-script entries are cleaned up after upgrade." \
+          "" \
+          "Files:" \
+          "- Signed APK is published automatically when repository signing secrets are configured." \
+          "- Unsigned APK is retained as a reproducible build artifact.")"
 
         if gh release view "$TAG" >/dev/null 2>&1; then
           gh release edit "$TAG" --title "RootScriptLauncher $TAG" --notes "$NOTES"
