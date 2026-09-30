@@ -96,10 +96,6 @@ jobs:
         fi
 
         TAG="v$VERSION_NAME"
-        UNSIGNED_SRC="app/build/outputs/apk/release/app-release-unsigned.apk"
-        UNSIGNED_DST="$RUNNER_TEMP/RootScriptLauncher-$TAG-Release-Unsigned.apk"
-        cp "$UNSIGNED_SRC" "$UNSIGNED_DST"
-
         NOTES="$(printf '%s\n' \
           "RootScriptLauncher $TAG" \
           "" \
@@ -109,8 +105,8 @@ jobs:
           "- Legacy bundled-script entries are cleaned up after upgrade." \
           "" \
           "Files:" \
-          "- Signed APK is published automatically when repository signing secrets are configured." \
-          "- Unsigned APK is retained as a reproducible build artifact.")"
+          "- Signed APK is published here only when repository signing secrets are configured." \
+          "- Unsigned APK is available only as a GitHub Actions artifact and is not installable.")"
 
         if gh release view "$TAG" >/dev/null 2>&1; then
           gh release edit "$TAG" --title "RootScriptLauncher $TAG" --notes "$NOTES"
@@ -118,7 +114,7 @@ jobs:
           gh release create "$TAG" --target "$GITHUB_SHA" --title "RootScriptLauncher $TAG" --notes "$NOTES"
         fi
 
-        gh release upload "$TAG" "$UNSIGNED_DST" --clobber
+        gh release delete-asset "$TAG" "RootScriptLauncher-$TAG-Release-Unsigned.apk" --yes >/dev/null 2>&1 || true
 
         SIGNED_SRC="app/build/outputs/apk/release/RootScriptLauncher-release-signed.apk"
         if [ -f "$SIGNED_SRC" ]; then
